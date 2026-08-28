@@ -1,0 +1,20 @@
+# ReRoom — runtime dependencies (versions verified in the dev environment: Python 3.11)
+# Install torch matching your CUDA build first, e.g.
+#   pip install torch --index-url https://download.pytorch.org/whl/cu124
+
+# --- core (required for training, retargeting, and all evaluation scripts) ---
+torch>=2.4            # dev env: 2.6.0+cu124
+numpy>=1.26           # dev env: 2.2.6
+scipy>=1.11           # dev env: 1.17.1  (Wilcoxon tests, linalg for FSD)
+shapely>=2.0          # dev env: 2.1.2   (room polygons, containment)
+trimesh>=4.0          # dev env: 5.0.0   (3D-FUTURE mesh sizes)
+
+# --- figures / reports ---
+matplotlib>=3.8       # dev env: 3.11.1
+Pillow>=10.0          # dev env: 12.3.0
+imageio>=2.30         # dev env: 2.37.4
+
+# --- optional: textured rendering (Fig. 7/8) and perception-side extras ---
+# pyrender==0.1.45          # EGL offscreen rendering of 3D-FUTURE meshes
+# open_clip_torch==3.3.0    # style/appearance features
+# clean-fid==0.1.35         # image-level distribution metrics

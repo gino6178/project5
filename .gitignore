@@ -1,0 +1,14 @@
+# large / generated — not source
+outputs/
+data/
+*.pt
+*.pkl
+*.jsonl.gz
+*.npz
+*.ckpt
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+*.log
+outputs_*.log
+.DS_Store
