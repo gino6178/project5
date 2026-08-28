@@ -1,100 +1,64 @@
-# ReRoom-E2E — design
+# ReRoom-E2E — 設計
 
-project4 ships a **staged** system: a hand-designed discrete prune (Stage 1), a
-flow trained on raw endpoints (Stage 2), and a projection \(\Pi_\theta\) bolted on
-at test time. Reviewers hit the same three seams every round: the pruning is a
-heuristic, \(\Pi_\theta\) is test-time-only, and the pieces are optimised for
-different objectives than the one we actually deploy.
+project4 是**分階段**系統：手工離散剪枝（Stage 1）、在原始端點上訓練的 flow（Stage 2）、以及測試期才外掛的投影 $\Pi_\theta$。三輪審稿反覆打同樣三個接縫：剪枝是啟發式、$\Pi_\theta$ 只在測試期、各元件優化的目標與實際部署的不一致。
 
-project5 collapses the pipeline into **one differentiable function trained with
-one objective**.
+project5 把整條 pipeline 收成**單一可微函數、單一目標、無後處理**。
 
 ---
 
-## 1. What actually changes
+## 1. 為什麼不用 DiT
 
-The decisive change is *where the supervision is applied*.
+不是為了「換一個」，而是 DiT 對這個任務有具體的不匹配，且 project4 自己的數據已經指出來：
+
+| DiT-flow（project4） | 問題（有數據） |
+|---|---|
+| 從噪聲 + prior 跑 50 步 ODE，取 16 個候選 → **1.4 秒** | 這個任務有**天然初始化**（來源佈局的仿射轉置）。Table 8 顯示：拿掉 informative prior，$S_\text{rel}$ 掉 0.054、碰撞翻倍——**大部分的工作是初始化做的**，從噪聲生成是浪費 |
+| 圖走獨立的 GNN 分支 + `rel_loss` 懲罰項 | 關係只是**事後的軟懲罰**，不是計算結構的一部分 |
+| 約束由外部 $\Pi_\theta$ 在測試期修 | 訓練目標與部署目標不一致；且**固定的能量梯度只有局部視野**——Table 2 顯示它在非凸房型只能把碰撞從 3.84% 修到 2.83%（簡單房型是 1.4%），**修不完** |
+| adaLN 條件在擴散時間 $\tau$ 上 | 沒有擴散過程要條件化 |
+
+最後一項是關鍵動機：**局部梯度無法繞過凹角**，因為它看不到全局。注意力可以。
+
+## 2. 架構：Constraint-Refinement Transformer (CRT)
 
 ```
-project4 (staged)
-  x0 ──flow──► x̂₁ ──────────────────────────► loss = FM(x̂₁, x₁)
-                └─(test time only)─► Πθ ─► x*        Πθ never sees a gradient
-                                                     that matters
+初始化   x⁽⁰⁾ = 來源佈局的仿射轉置（已在 batch 的 cond[...,10:14]）
 
-project5 (end-to-end)
-  x0 ──flow──► x̂₁ ──Πθ(K steps, differentiable)──► x*
-       │                                             loss = FM(x*, x₁) + …
-       └─existence head ℓ ──(straight-through)──► keep mask, gates Πθ's
-                                                   collision/containment terms
+for l = 1..L:                                   ← 精修塊，取代 ODE 步
+    v⁽ˡ⁾ = 違規特徵(x⁽ˡ⁻¹⁾, 邊界, 成對關係)      ← 在網路內可微計算
+    h    = [狀態 ‖ 條件 ‖ 類別嵌入 ‖ v⁽ˡ⁾]
+    h    = SelfAttn(h, bias = 圖邊編碼 + 幾何偏置)   ← 圖是注意力偏置，非懲罰項
+    h    = CrossAttn(h, 邊界 token)                  ← 直接對牆推理
+    x⁽ˡ⁾ = x⁽ˡ⁻¹⁾ + MLP(h)                          ← 殘差修正
+
+輸出 x⁽ᴸ⁾ —— 即最終佈局，無後處理
 ```
 
-The model is trained so that the layout is correct **after** projection, and so
-that the objects it decides to keep are the ones that survive projection well.
-Selection, placement, and feasibility stop being three objectives and become one.
+三個設計決策：
 
-**Why this is not the experiment that already failed.** project4 tried two
-bolt-ons — `proj_loss` (train-through \(\Pi_\theta\)) and a Gromov–Wasserstein
-relational loss — and both measured a clean null (project4 §7). Both *fine-tuned
-an already-converged model* while still supervising the raw endpoint; the
-projection was an extra penalty, not part of the model. Here the projection is
-inside the forward pass from step 0 of training, and the reconstruction loss is
-computed through it. A converged staged model has no reason to move; a model
-trained this way from scratch has no other option.
+**（一）違規特徵進網路，不是進損失。** 每一塊都在網路內算出每個物件的違規訊號（與非可嵌套物件的最大重疊量、到最近牆的帶號距離與法向、相對來源的關係偏差），當作 token 特徵。網路因此**學會如何修正**，而不是沿著固定的能量梯度走。這就是「優化在 transformer 內」。
 
-## 2. Components (all already in the library, rewired)
+**（二）圖作為注意力偏置。** 邊特徵（關係類型 + 彈性 $\alpha$）調變注意力 logits，所以「誰跟誰必須保持關係」是計算結構的一部分。關係保留不再靠 `rel_loss` 事後拉回。
 
-| Piece | Source | Role in the end-to-end model |
-|---|---|---|
-| Hierarchical metric code | `reroom/generative/model.py` | unchanged — scale-invariant parameterization |
-| Rectified flow + informative prior | `reroom/generative/train.py` | unchanged — transport from the affine transplant |
-| Existence head (`mask_flow`) | `train.py` (D1) | promoted from auxiliary to the **selection mechanism**; straight-through so it gates geometry |
-| \(\Pi_\theta\) unrolled projection | `retarget/diffproj.py`, `_proj_through_energy` | moved **into** the forward pass; supervision flows through it |
-| Relational mass | `retarget/gwselect.py` | kept as the *inference-time* fallback and as the ablation baseline for the learned selection |
+**（三）確定性、單次前向。** 沒有噪聲、沒有 ODE、沒有 $k$ 個候選。從仿射轉置出發做 $L$ 次殘差精修，一次前向得到答案。
 
-## 3. Training objective
+## 3. 訓練目標
 
-With \(x^* = \Pi_\theta(\hat x_1, m)\) where \(m\) is the straight-through keep mask:
+- **重建**：對真實佈局的加權 L2（motif 子物件加權，沿用 project4 的 `child_loss_weight`）
+- **終端可行性**：$E_\text{geo}(x^{(L)})$ —— 最後一塊的輸出必須可行，這是「無後處理」的壓力來源
+- **深監督**：違規量必須逐塊單調下降，$\sum_l \max(0, E(x^{(l)}) - E(x^{(l-1)}))$，避免中間塊亂跳
+- **關係保留**：沿用 motif 剛性項，確保可行性不是靠拆散設計換來的
 
-* **reconstruction through the projection** — flow-matching against the real
-  layout, evaluated on \(x^*\); gated to \(\tau > \tau_\text{proj}\) where the
-  endpoint estimate is meaningful, falling back to raw-endpoint FM below it (the
-  model still needs a usable velocity field at low \(\tau\)).
-* **existence** — the D1 velocity loss on the keep logit, plus a capacity term so
-  the kept count matches what the target room can hold.
-* **feasibility residual** — \(E_\text{geo}(x^*)\): whatever the projection could
-  not fix is charged to the flow, which is the pressure that makes the output
-  feasible-by-construction rather than projection-dependent.
-* **relational** — the existing motif-rigidity term, unchanged, so identity
-  preservation is not traded away silently.
+## 4. 什麼結果算失敗（先寫下來）
 
-## 4. What must be measured (and what would falsify this)
+與 project4 在**相同協定**下比較（`REPRODUCE.md` 有表格→指令對照）。CRT 必須做到：
 
-Comparisons run against project4's shipped checkpoint on the **same protocol**,
-so the tables stay comparable (`REPRODUCE.md` in project4 maps table → command).
+1. **無後處理的可行性** ≥ project4 **加了** $\Pi_\theta$ 之後的水準，尤其在非凸房型（project4 Table 2：2.83%）
+2. **關係保留不退步**：$S_\text{rel}^\text{kept}$ 在雜訊範圍內
+3. **更快**：單次前向 vs 1.4 秒取樣
 
-The end-to-end model earns its place only if it shows, with reference-clustered
-statistics:
+若 CRT 只能打平「flow + 外掛投影」，那就**誠實報成 negative result**——它會反過來說明分階段是正確的分解，而非妥協。兩種結果都可寫，都不值得誇大。
 
-1. **learned selection ≥ relational-mass heuristic** on \(S_\text{rel}\) under
-   capacity pressure (project4 Table 7 is the bar), and
-2. **feasibility without the deployed projection** — i.e. raw output collision
-   approaching the staged model's *post*-projection collision, especially on the
-   non-convex boundaries where the staged model degrades (project4 Table 2/10),
-   and
-3. **no relational regression** — \(S_\text{rel}^\text{kept}\) within noise of the
-   staged model.
+## 5. 狀態
 
-If the end-to-end model only matches the staged pipeline, that is a **negative
-result and gets reported as one**: it would say the staged decomposition is not a
-compromise but the right factorization — which is exactly what project4 §7
-argues. Either outcome is publishable; neither is worth overselling.
-
-## 5. Status
-
-Remote training tree is **`/opt/NeMo/reroom/e2e`** (project4 keeps
-`/opt/NeMo/reroom/src`); `scripts/rsync_remote.py` targets it by default and honours
-`REROOM_REMOTE`, so pushes here can never clobber project4.
-
-Scaffolded from project4 at commit `40d25ba` (library + the entry points that
-produce the paper tables). Datasets and checkpoints live on the GPU box; nothing
-large is committed.
+從 project4 commit `40d25ba` 分支。遠端訓練樹 **`/opt/NeMo/reroom/e2e`**（project4 保留 `/opt/NeMo/reroom/src`），`scripts/rsync_remote.py` 預設指向它並支援 `REROOM_REMOTE`，推檔不會互相覆蓋。資料集與權重不進 git。
