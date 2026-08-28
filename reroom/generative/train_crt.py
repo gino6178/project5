@@ -23,8 +23,9 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from .refiner import ConstraintRefinementTransformer
-from .train import (RetargetPairs, _collate_fn, _geo_energy, _nestable_matrix)
+from .refiner import GraphRefinementTransformer
+from .train import RetargetPairs, _collate_fn
+from .graphcore import gap_supervision, graph_violation
 from .walkable import walkability
 
 __all__ = ["CRTConfig", "train_crt"]
@@ -48,6 +49,7 @@ class CRTConfig:
                                    # rasterised flood fill cannot reach. This is
                                    # the axis PhyScene wins on (walkable 0.963 vs
                                    # project4's 0.900), so we optimise it directly.
+    w_gap: float = 1.0             # supervision for the learned pair spacing
     child_weight: float = 10.0     # upweight motif children (as in project4)
     # data
     levels: tuple = (1, 2, 3, 4, 5)
@@ -112,8 +114,8 @@ def train_crt(scenes, val_scenes=None, cfg: CRTConfig | None = None, elasticity=
         val_dl = DataLoader(val_ds, batch_size=cfg.batch, shuffle=False,
                             num_workers=0, collate_fn=_collate_fn)
 
-    model = ConstraintRefinementTransformer(cfg.d_model, cfg.n_blocks, cfg.heads).to(dev)
-    ema = ConstraintRefinementTransformer(cfg.d_model, cfg.n_blocks, cfg.heads).to(dev)
+    model = GraphRefinementTransformer(cfg.d_model, cfg.n_blocks, cfg.heads).to(dev)
+    ema = GraphRefinementTransformer(cfg.d_model, cfg.n_blocks, cfg.heads).to(dev)
     ema.load_state_dict(model.state_dict())
     for p in ema.parameters():
         p.requires_grad_(False)
@@ -123,38 +125,39 @@ def train_crt(scenes, val_scenes=None, cfg: CRTConfig | None = None, elasticity=
     steps = cfg.epochs * max(len(dl), 1)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=cfg.lr,
                                                 total_steps=max(steps, 1), pct_start=0.06)
-    nest = _nestable_matrix(dev)
 
     best = float("inf"); step = 0; history = []
     for ep in range(cfg.epochs):
         model.train()
-        agg = {k: 0.0 for k in ("recon", "term", "mono", "rel", "walk")}
+        agg = {k: 0.0 for k in ("recon", "term", "mono", "rel", "walk", "gap")}
         cnt = 0
         for batch in dl:
             batch = {k: v.to(dev, non_blocking=True) for k, v in batch.items()}
-            x, trace = model(batch, nest, return_trace=True)
+            x, trace = model(batch, return_trace=True)
 
             m = batch["mask"][..., None].float()
             is_child = (batch["parent"] >= 0).float()[..., None]
             w = m * (1.0 + (cfg.child_weight - 1.0) * is_child)
             recon = ((x - batch["state"]) ** 2 * w).sum() / w.sum().clamp(min=1)
 
-            term = _geo_energy(x, batch, nest)
+            term = graph_violation(x, batch, model.gap)[1].mean()
 
             mono = x.new_zeros(())
             if cfg.w_monotone > 0.0 and len(trace) > 1:
-                prev = _geo_energy(trace[0], batch, nest)
+                prev = graph_violation(trace[0], batch, model.gap)[1].mean()
                 for t in trace[1:]:
-                    cur = _geo_energy(t, batch, nest)
+                    cur = graph_violation(t, batch, model.gap)[1].mean()
                     mono = mono + (cur - prev).clamp(min=0.0)   # only penalise increases
                     prev = cur
 
             rel = _relation_loss(x, batch)
             walk = walkability(x, batch, G=32)[0].mean() if cfg.w_walk > 0 else x.new_zeros(())
+            # trains what "correct spacing" means, from the real layouts themselves
+            gapsup = gap_supervision(batch, model.gap)
 
             loss = (cfg.w_recon * recon + cfg.w_terminal * term
                     + cfg.w_monotone * mono + cfg.w_relation * rel
-                    + cfg.w_walk * walk)
+                    + cfg.w_walk * walk + cfg.w_gap * gapsup)
             opt.zero_grad(set_to_none=True)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)
@@ -168,7 +171,7 @@ def train_crt(scenes, val_scenes=None, cfg: CRTConfig | None = None, elasticity=
             n = int(batch["mask"].sum())
             agg["recon"] += float(recon) * n; agg["term"] += float(term) * n
             agg["mono"] += float(mono) * n; agg["rel"] += float(rel) * n
-            agg["walk"] += float(walk) * n
+            agg["walk"] += float(walk) * n; agg["gap"] += float(gapsup) * n
             cnt += n; step += 1
             if step % cfg.log_every == 0:
                 print(f"  ep {ep} step {step}/{steps} " +
@@ -180,10 +183,10 @@ def train_crt(scenes, val_scenes=None, cfg: CRTConfig | None = None, elasticity=
             with torch.no_grad():
                 for b in val_dl:
                     b = {k: v.to(dev) for k, v in b.items()}
-                    xv = ema(b, nest)
+                    xv = ema(b)
                     mm = b["mask"][..., None].float()
                     vr += float(((xv - b["state"]) ** 2 * mm).sum() / mm.sum().clamp(min=1)) * int(b["mask"].sum())
-                    vt += float(_geo_energy(xv, b, nest)) * int(b["mask"].sum())
+                    vt += float(graph_violation(xv, b, ema.gap)[1].mean()) * int(b["mask"].sum())
                     vn += int(b["mask"].sum())
             row["val_recon"] = vr / max(vn, 1); row["val_energy"] = vt / max(vn, 1)
         history.append(row)
