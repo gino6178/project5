@@ -72,6 +72,37 @@ def _free_vector(device):
     return v
 
 
+def _proj_forward(x1_hat, batch, nest_mat, free_vec, keep=None,
+                  iters: int = 15, step: float = 0.2, anchor: float = 2.0):
+    """END-TO-END forward projection: return the PROJECTED layout x* itself.
+
+    Same anchored unrolled operator as ``_proj_through_energy``, but it hands back
+    the projected state rather than its energy, so the reconstruction loss can be
+    computed *through* the projection (project5's central change: the model is
+    trained so the layout is right AFTER Pi_theta, making the projection part of
+    the model instead of a post-hoc repair).
+
+    ``keep`` (B,N) in [0,1] is a differentiable/straight-through existence mask:
+    dropped objects are excluded from the collision term, so the learned selection
+    and the geometry are optimised against one another rather than separately.
+    Gradients reach both x1_hat and keep.
+    """
+    mf = batch["mask"].float()
+    if keep is not None:
+        mf = mf * keep
+    bat = dict(batch); bat["mask"] = mf          # energy respects the keep mask
+    p0 = x1_hat[..., :2]
+    ori = x1_hat[..., 2:4]
+    free = free_vec[batch["cat"]].float()
+    movable = ((1.0 - free) * mf)[..., None]
+    q = p0
+    for _ in range(iters):
+        E = _geo_energy(torch.cat([q, ori.detach()], dim=-1), bat, nest_mat)
+        g = torch.autograd.grad(E, q, create_graph=True)[0]
+        q = q - step * (g + anchor * (q - p0)) * movable
+    return torch.cat([q, ori], dim=-1)
+
+
 def _proj_through_energy(x1_hat, batch, nest_mat, free_vec,
                          iters: int = 15, step: float = 0.2, anchor: float = 2.0):
     """Train-through differentiable projection (A / Prop 3).
@@ -343,6 +374,17 @@ class TrainConfig:
                                      # unroll (topology-preserving; mirrors the
                                      # deployed project_batch's w_anchor).
     proj_loss_tau: float = 0.5       # only fire the projection loss above this tau.
+    # --- project5: END-TO-END joint training -------------------------------
+    e2e: bool = False                # master switch. Applies the reconstruction
+                                     # loss to the PROJECTED layout x*=Pi(x1_hat)
+                                     # instead of the raw endpoint, so selection,
+                                     # placement and feasibility are optimised
+                                     # against one deployed objective (DESIGN.md).
+    e2e_recon: float = 1.0           # weight of the through-projection recon loss
+    e2e_resid: float = 1.0           # weight of E_geo(x*): residual infeasibility
+                                     # the projection could NOT fix is charged to
+                                     # the flow -> feasible-by-construction.
+    e2e_tau: float = 0.5             # fire above this tau (endpoint must be usable)
     gw_loss: float = 0.0             # B: differentiable entropic GROMOV-WASSERSTEIN
                                      # relational loss (true OT).  Couples the
                                      # reference and generated relational
@@ -734,6 +776,7 @@ def train_flow(scenes: list[Scene], val_scenes: list[Scene] | None = None,
         tot_pj = 0.0
         tot_pe = 0.0
         tot_gw = 0.0
+        tot_e2e = 0.0
         for batch in dl:
             batch = {k: v.to(dev, non_blocking=True) for k, v in batch.items()}
             x1_world = batch["state"]
@@ -810,6 +853,34 @@ def train_flow(scenes: list[Scene], val_scenes: list[Scene] | None = None,
                 # and switch the target to the world GT.
                 x1_hat = to_world(x1_hat, _par, _fh)
                 x1 = x1_world
+            # --- project5: end-to-end supervision THROUGH the projection ---
+            if cfg.e2e and (cfg.e2e_recon > 0.0 or cfg.e2e_resid > 0.0):
+                fire = (tau > cfg.e2e_tau)
+                if fire.any():
+                    sub = {k: batch[k][fire] for k in
+                           ("mask", "frame_h", "cond", "cat", "boundary")}
+                    keep = None
+                    if cfg.mask_flow:
+                        # straight-through keep mask from the existence endpoint:
+                        # hard in the forward pass, soft gradient backward, so the
+                        # learned selection shapes the projected geometry.
+                        ell1_hat = batch["ell"][fire] + (1 - tau[fire])[:, None, None] * ell_v[fire]
+                        soft = torch.sigmoid(ell1_hat.squeeze(-1))
+                        keep = (soft > 0.5).float() + soft - soft.detach()
+                    xs = _proj_forward(x1_hat[fire], sub, nest_mat, free_vec, keep=keep,
+                                       iters=cfg.proj_iters, step=cfg.proj_step,
+                                       anchor=cfg.proj_anchor)
+                    wm = sub["mask"].float()
+                    if cfg.mask_flow:
+                        wm = wm * present1[fire].squeeze(-1)
+                    wm = wm[..., None]
+                    e2e_recon = (((xs - x1[fire]) ** 2) * wm).sum() / wm.sum().clamp(min=1)
+                    e2e_resid = _geo_energy(xs, sub, nest_mat)
+                else:
+                    e2e_recon = torch.zeros((), device=dev); e2e_resid = torch.zeros((), device=dev)
+            else:
+                e2e_recon = torch.zeros((), device=dev); e2e_resid = torch.zeros((), device=dev)
+
             if cfg.wall_aux > 0.0:
                 pp = x1_hat[..., :2]                             # (B, N, 2)
                 pt = x1[..., :2]
@@ -971,6 +1042,7 @@ def train_flow(scenes: list[Scene], val_scenes: list[Scene] | None = None,
                 + cfg.rel_loss * rel_loss \
                 + cfg.energy_loss * energy_geo \
                 + cfg.proj_loss * proj_disp \
+                + cfg.e2e_recon * e2e_recon + cfg.e2e_resid * e2e_resid \
                 + cfg.mask_loss * mask_l
             opt.zero_grad(set_to_none=True)
             loss.backward()
@@ -992,6 +1064,7 @@ def train_flow(scenes: list[Scene], val_scenes: list[Scene] | None = None,
             tot_pj += float(proj_disp) * int(m.sum())
             tot_pe += float(proj_pre_E) * int(m.sum())
             tot_gw += float(gw_l) * int(m.sum())
+            tot_e2e += float(e2e_recon) * int(m.sum())
             cnt += int(m.sum())
             step += 1
             if step % cfg.log_every == 0:
@@ -1007,6 +1080,8 @@ def train_flow(scenes: list[Scene], val_scenes: list[Scene] | None = None,
             row["proj_preE"] = tot_pe / max(cnt, 1)
         if cfg.gw_loss > 0.0:
             row["gw_loss"] = tot_gw / max(cnt, 1)
+        if cfg.e2e:
+            row["e2e_recon"] = tot_e2e / max(cnt, 1)
         if val_dl is not None:
             val_fm, val_metric_m = _validate(ema, val_dl, dev,
                                              prior_x0=cfg.prior_x0, prior_noise=cfg.prior_noise,
