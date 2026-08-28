@@ -91,6 +91,10 @@ argues. Either outcome is publishable; neither is worth overselling.
 
 ## 5. Status
 
+Remote training tree is **`/opt/NeMo/reroom/e2e`** (project4 keeps
+`/opt/NeMo/reroom/src`); `scripts/rsync_remote.py` targets it by default and honours
+`REROOM_REMOTE`, so pushes here can never clobber project4.
+
 Scaffolded from project4 at commit `40d25ba` (library + the entry points that
 produce the paper tables). Datasets and checkpoints live on the GPU box; nothing
 large is committed.

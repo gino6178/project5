@@ -15,7 +15,9 @@ sys.path.insert(0, os.path.expanduser("~/.local/share/runai-tools"))
 import jexec  # noqa: E402
 
 REPO_LOCAL = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-REPO_REMOTE = "/opt/NeMo/reroom/src"
+# project5 lives in its OWN remote directory so pushing here can never clobber
+# project4's tree (override with REROOM_REMOTE).
+REPO_REMOTE = os.environ.get("REROOM_REMOTE", "/opt/NeMo/reroom/e2e")
 
 
 def _run(code, timeout=1800):
