@@ -28,7 +28,7 @@ from .tokens import TOKEN_COND_DIM, EDGE_DIM, CATS
 __all__ = ["ConstraintRefinementTransformer", "violation_features"]
 
 STATE_DIM = 4          # (u, v, cos yaw, sin yaw)
-N_VIOL = 7             # see violation_features
+N_VIOL = 8             # see violation_features
 
 
 # --------------------------------------------------------------------------- #
@@ -50,6 +50,9 @@ def violation_features(x, batch, nest_mat):
         5  distance to the nearest boundary  (wall proximity, for wall affinity)
         6  deviation of this object's offset to its motif parent from the
            reference offset  (relation strain, metres)
+        7  blocked walkway near this object: free floor around it that the
+           rasterised flood fill cannot reach. This is the signal that lets the
+           network learn "I am the thing severing the corridor" (walkable.py).
     """
     mask = batch["mask"].float()                                   # (B,N)
     fh = batch["frame_h"]                                          # (B,2)
@@ -88,8 +91,19 @@ def violation_features(x, batch, nest_mat):
     ref_off = ref - torch.gather(ref, 1, pidx[..., None].expand(-1, -1, 2))
     strain = (cur_off - ref_off).norm(dim=-1) * has_par.float()
 
+    # ---- blocked walkway around each object (rasterised, differentiable) ----
+    from .walkable import walkability
+    _, reach, freem = walkability(x, batch, G=32)
+    blockedmap = (freem - reach).clamp(min=0.0)                # (B,1,G,G)
+    G = blockedmap.shape[-1]
+    # sample the blocked map at each object's cell (grid spans the room extent)
+    gxy = (x[..., :2].clamp(-1, 1) + 1.0) * 0.5 * (G - 1)
+    gi = gxy.round().long().clamp(0, G - 1)
+    flat = blockedmap.reshape(blockedmap.shape[0], -1)
+    near_blocked = torch.gather(flat, 1, (gi[..., 1] * G + gi[..., 0]))
+
     v = torch.stack([v_max, v_sum, clearance, near_n[..., 0], near_n[..., 1],
-                     wall_dist, strain], dim=-1)
+                     wall_dist, strain, near_blocked], dim=-1)
     return v * mask[..., None]
 
 

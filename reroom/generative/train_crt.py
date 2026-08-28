@@ -25,6 +25,7 @@ from torch.utils.data import DataLoader
 
 from .refiner import ConstraintRefinementTransformer
 from .train import (RetargetPairs, _collate_fn, _geo_energy, _nestable_matrix)
+from .walkable import walkability
 
 __all__ = ["CRTConfig", "train_crt"]
 
@@ -43,6 +44,10 @@ class CRTConfig:
     w_terminal: float = 1.0        # E_geo at the final block
     w_monotone: float = 0.2        # penalise violation increasing across blocks
     w_relation: float = 2.0        # motif rigidity vs the reference
+    w_walk: float = 1.0            # blocked-walkway penalty: free floor the
+                                   # rasterised flood fill cannot reach. This is
+                                   # the axis PhyScene wins on (walkable 0.963 vs
+                                   # project4's 0.900), so we optimise it directly.
     child_weight: float = 10.0     # upweight motif children (as in project4)
     # data
     levels: tuple = (1, 2, 3, 4, 5)
@@ -123,7 +128,7 @@ def train_crt(scenes, val_scenes=None, cfg: CRTConfig | None = None, elasticity=
     best = float("inf"); step = 0; history = []
     for ep in range(cfg.epochs):
         model.train()
-        agg = {k: 0.0 for k in ("recon", "term", "mono", "rel")}
+        agg = {k: 0.0 for k in ("recon", "term", "mono", "rel", "walk")}
         cnt = 0
         for batch in dl:
             batch = {k: v.to(dev, non_blocking=True) for k, v in batch.items()}
@@ -145,9 +150,11 @@ def train_crt(scenes, val_scenes=None, cfg: CRTConfig | None = None, elasticity=
                     prev = cur
 
             rel = _relation_loss(x, batch)
+            walk = walkability(x, batch, G=32)[0].mean() if cfg.w_walk > 0 else x.new_zeros(())
 
             loss = (cfg.w_recon * recon + cfg.w_terminal * term
-                    + cfg.w_monotone * mono + cfg.w_relation * rel)
+                    + cfg.w_monotone * mono + cfg.w_relation * rel
+                    + cfg.w_walk * walk)
             opt.zero_grad(set_to_none=True)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)
@@ -161,6 +168,7 @@ def train_crt(scenes, val_scenes=None, cfg: CRTConfig | None = None, elasticity=
             n = int(batch["mask"].sum())
             agg["recon"] += float(recon) * n; agg["term"] += float(term) * n
             agg["mono"] += float(mono) * n; agg["rel"] += float(rel) * n
+            agg["walk"] += float(walk) * n
             cnt += n; step += 1
             if step % cfg.log_every == 0:
                 print(f"  ep {ep} step {step}/{steps} " +
