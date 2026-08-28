@@ -1,6 +1,6 @@
 # large / generated — not source
-outputs/
-data/
+/outputs/
+/data/
 *.pt
 *.pkl
 *.jsonl.gz
