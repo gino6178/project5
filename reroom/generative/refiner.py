@@ -33,7 +33,7 @@ from .tokens import CATS, TOKEN_COND_DIM
 __all__ = ["GraphRefinementTransformer", "violation_features"]
 
 STATE_DIM = 4          # (u, v, cos yaw, sin yaw)
-N_VIOL = 7             # see violation_features
+N_VIOL = 9             # see violation_features
 
 
 def violation_features(x, batch, predictor, use_walk: bool = True):
@@ -47,6 +47,9 @@ def violation_features(x, batch, predictor, use_walk: bool = True):
         5  offset drift from the motif parent versus the reference (metres)
         6  blocked walkway near this object: free floor the rasterised flood fill
            cannot reach (zero when walkability is switched off)
+        7  metres the worst oriented-box corner pokes outside the room
+        8  this object's own soft reachability, the differentiable analogue of
+           the per-object quantity PhyScene's R_reach counts
 
     These are *features*, not a loss: the blocks consume them and learn the
     correction.
@@ -79,9 +82,13 @@ def violation_features(x, batch, predictor, use_walk: bool = True):
     strain = (cur_off - ref_off).norm(dim=-1) * (par >= 0).float()
 
     # ---- blocked walkway (rasterised, differentiable) ----
+    from .walkable import boundary_outside
+    outside = boundary_outside(x, batch)
+
     if use_walk:
-        from .walkable import walkability
+        from .walkable import object_reachability, walkability
         _, reach, freem = walkability(x, batch, G=32)
+        obj_reach = object_reachability(x, batch, G=32)[0]
         blocked = (freem - reach).clamp(min=0.0)
         G = blocked.shape[-1]
         gxy = (x[..., :2].clamp(-1, 1) + 1.0) * 0.5 * (G - 1)
@@ -90,9 +97,10 @@ def violation_features(x, batch, predictor, use_walk: bool = True):
                                     gi[..., 1] * G + gi[..., 0])
     else:
         near_blocked = torch.zeros_like(wall_dist)
+        obj_reach = torch.ones_like(wall_dist)
 
     v = torch.stack([v_pair, clearance, near_n[..., 0], near_n[..., 1],
-                     wall_dist, strain, near_blocked], dim=-1)
+                     wall_dist, strain, near_blocked, outside, obj_reach], dim=-1)
     return v * mask[..., None]
 
 

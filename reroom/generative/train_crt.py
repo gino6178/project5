@@ -11,6 +11,8 @@ The objective is the one we deploy (DESIGN.md §3):
   monotone     deep supervision: violation must not increase from block to block
   relation     motif rigidity against the reference offsets, so feasibility is
                not bought by pulling the design apart
+  boundary     metres the worst oriented-box corner pokes outside the room
+  reach        1 - per-object soft reachability (PhyScene's R_reach, relaxed)
 """
 from __future__ import annotations
 
@@ -26,7 +28,7 @@ from torch.utils.data import DataLoader
 from .refiner import GraphRefinementTransformer
 from .train import RetargetPairs, _collate_fn
 from .graphcore import gap_supervision, graph_violation
-from .walkable import walkability
+from .walkable import boundary_outside, object_reachability, walkability
 
 __all__ = ["CRTConfig", "train_crt"]
 
@@ -50,6 +52,14 @@ class CRTConfig:
                                    # the axis PhyScene wins on (walkable 0.963 vs
                                    # project4's 0.900), so we optimise it directly.
     w_gap: float = 1.0             # supervision for the learned pair spacing
+    w_bound: float = 1.5           # metres poking outside the room, worst corner.
+                                   # Run 3 left L/T out-of-floor at 0.270/0.252
+                                   # because containment was only ever a feature.
+    w_reach: float = 1.5           # 1 - per-object soft reachability, the metric
+                                   # PhyScene actually reports. Run 3 optimised
+                                   # blocked *area* instead and lost reach 4-1.
+    walk_G: int = 48               # loss-side grid; features stay at 32 for cost
+    robot: float = 0.3             # PhyScene's robot_real_width, metres
     child_weight: float = 10.0     # upweight motif children (as in project4)
     # data
     levels: tuple = (1, 2, 3, 4, 5)
@@ -129,7 +139,7 @@ def train_crt(scenes, val_scenes=None, cfg: CRTConfig | None = None, elasticity=
     best = float("inf"); step = 0; history = []
     for ep in range(cfg.epochs):
         model.train()
-        agg = {k: 0.0 for k in ("recon", "term", "mono", "rel", "walk", "gap", "move")}
+        agg = {k: 0.0 for k in ("recon", "term", "mono", "rel", "walk", "gap", "bnd", "rch", "move")}
         cnt = 0
         for batch in dl:
             batch = {k: v.to(dev, non_blocking=True) for k, v in batch.items()}
@@ -160,12 +170,22 @@ def train_crt(scenes, val_scenes=None, cfg: CRTConfig | None = None, elasticity=
 
             rel = _relation_loss(x, batch)
             walk = walkability(x, batch, G=32)[0].mean() if cfg.w_walk > 0 else x.new_zeros(())
+            # containment and reachability, both charged at the final block
+            bnd = boundary_outside(x, batch)
+            mkf = batch["mask"].float()
+            bnd = (bnd * mkf).sum() / mkf.sum().clamp(min=1)
+            if cfg.w_reach > 0:
+                hit = object_reachability(x, batch, G=cfg.walk_G, robot=cfg.robot)[0]
+                rch = ((1.0 - hit) * mkf).sum() / mkf.sum().clamp(min=1)
+            else:
+                rch = x.new_zeros(())
             # trains what "correct spacing" means, from the real layouts themselves
             gapsup = gap_supervision(batch, model.gap)
 
             loss = (cfg.w_recon * recon + cfg.w_terminal * term
                     + cfg.w_monotone * mono + cfg.w_relation * rel
-                    + cfg.w_walk * walk + cfg.w_gap * gapsup)
+                    + cfg.w_walk * walk + cfg.w_gap * gapsup
+                    + cfg.w_bound * bnd + cfg.w_reach * rch)
             opt.zero_grad(set_to_none=True)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)
@@ -180,6 +200,7 @@ def train_crt(scenes, val_scenes=None, cfg: CRTConfig | None = None, elasticity=
             agg["recon"] += float(recon) * n; agg["term"] += float(term) * n
             agg["mono"] += float(mono) * n; agg["rel"] += float(rel) * n
             agg["walk"] += float(walk) * n; agg["gap"] += float(gapsup) * n
+            agg["bnd"] += float(bnd) * n; agg["rch"] += float(rch) * n
             agg["move"] += float(move) * n
             cnt += n; step += 1
             if step % cfg.log_every == 0:

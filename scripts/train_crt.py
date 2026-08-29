@@ -22,6 +22,14 @@ print(f"[crt] scenes={len(scenes)} train={len(tr)} val={len(va)}", flush=True)
 # showed exactly that -- val_recon rose 8x while val_energy kept falling. This is
 # an objective conflict, not overfitting, so it is fixed by weighting, not by
 # regularisation. w_walk adds the rasterised blocked-walkway penalty.
+# Run 4 targets the two axes run 3 lost on. Run 3 beat PhyScene on collision in
+# all five shapes (0.207-0.518 vs 0.429-0.556, four of them under the real-layout
+# baseline of 0.400) but lost reach 4-1 and out-of-floor on the concave shapes.
+# Both losses have the same cause: containment and reachability entered the model
+# only as features, never as an objective, and the walkability loss optimised
+# blocked *area* while PhyScene reports a *per-object* reach rate. w_bound and
+# w_reach charge both at the final block, against the metric's own definition.
+#
 # Run 2 collapsed to the identity: it moved objects 0.048 m from the affine
 # transplant it starts at and scored exactly like the affine warp (S_rel 0.934,
 # S_motif 1.000, R_col 4.69%). The cause is in the data — RetargetPairs builds the
@@ -33,6 +41,7 @@ print(f"[crt] scenes={len(scenes)} train={len(tr)} val={len(va)}", flush=True)
 cfg = CRTConfig(epochs=60, batch=128, lr=3.0e-4, d_model=384, n_blocks=6, heads=8,
                 w_recon=1.0, w_terminal=2.0, w_monotone=0.5, w_relation=1.0,
                 w_walk=2.0, w_gap=1.0, weight_decay=3.0e-4,
-                workers=0, out="outputs/grt3")
+                w_bound=1.5, w_reach=1.5, walk_G=48, robot=0.3,
+                workers=0, out="outputs/grt4")
 train_crt(tr, va, cfg, elasticity=el)
 print("[crt] DONE", flush=True)
