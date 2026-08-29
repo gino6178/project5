@@ -189,7 +189,7 @@ a{color:var(--accent)}
     <span><b>倉庫</b> <a href="https://github.com/gino6178/project5">gino6178/project5</a></span>
     <span><b>遠端訓練樹</b> /opt/NeMo/reroom/e2e</span>
     <span><b>分支自</b> project4 @ 40d25ba</span>
-    <span><b>更新</b> 2026-08-29 · run 6 訓練中</span>
+    <span><b>更新</b> 2026-08-29 · run 6 已評測</span>
   </div>
 </header>
 
@@ -220,7 +220,8 @@ a{color:var(--accent)}
       <tr><td>GRT 恆等塌縮</td><td class="n"><span class="chip c-done">已修復</span></td><td class="n">位移 0.048 → 0.342 m</td></tr>
       <tr class="hi"><td>GRT vs PhyScene 碰撞率（相同房型、相同指標）</td><td class="n"><span class="chip c-done">已量測</span></td><td class="n"><span class="w">五個房型全勝</span></td></tr>
       <tr><td>GRT vs PhyScene 出界率</td><td class="n"><span class="chip c-done">已量測</span></td><td class="n">3 勝 2 敗</td></tr>
-      <tr><td>GRT vs PhyScene 可達率</td><td class="n"><span class="chip c-done">已量測</span></td><td class="n"><span class="l">4 敗 1 勝</span></td></tr>
+      <tr><td>GRT vs PhyScene 可達率</td><td class="n"><span class="chip c-done">已量測</span></td><td class="n"><span class="w">3 勝 1 平 1 敗</span></td></tr>
+      <tr><td>非凸碰撞達 project4 判準（≤ 2.83%）</td><td class="n"><span class="chip c-wait">退步</span></td><td class="n"><span class="l">run 6 為 3.81%</span></td></tr>
       <tr><td>PhyScene 對來源房間的語意保留</td><td class="n"><span class="chip c-wait">待量測</span></td><td class="n">預期 ≈ 0</td></tr>
     </tbody>
   </table>
@@ -237,7 +238,7 @@ a{color:var(--accent)}
     <tbody>
       <tr><td>生成式合成（ATISS / PhyScene）</td><td class="n"><span class="l">無機制</span></td><td class="n"><span class="w">分布內佳</span></td><td>與來源房間無關；房型條件綁在資料集分布上</td></tr>
       <tr><td>仿射映射</td><td class="n"><span class="w">S<sub>motif</sub> 1.000</span></td><td class="n"><span class="l">9.7% 出界</span></td><td>家具是剛體，目標邊界不是等比副本</td></tr>
-      <tr class="hi"><td>GRT（本文）</td><td class="n"><span class="w">S<sub>motif</sub> 1.000</span></td><td class="n"><span class="w">Col_obj 0.207–0.518</span></td><td>可達率仍不如 PhyScene（§5）</td></tr>
+      <tr class="hi"><td>GRT（本文）</td><td class="n"><span class="w">S<sub>motif</sub> 1.000</span></td><td class="n"><span class="w">Col_obj 0.139–0.456</span></td><td>凹角出界率仍不如 PhyScene（§5）</td></tr>
     </tbody>
   </table>
   <caption>仿射的失效<strong>不在關係層面而在物理層面</strong>——它的 motif 保留是完美的 1.000。這修正了 project4 早期版本的動機敘事。</caption></div>
@@ -372,33 +373,51 @@ a{color:var(--accent)}
   <p>GRT 跑在<strong>與 §2 完全相同的五個合成房型</strong>上，用<strong>同一份 <code>physcene_metrics</code> 實作</strong>量測，避免兩個系統各自挑對自己有利的設定。GRT 為單次前向、無後處理；PhyScene 為官方權重、其自身預設引導設定。</p>
 
   <div class="tw"><table>
-    <thead><tr><th>房型</th><th colspan="2">Col_obj ↓</th><th colspan="2">R_out ↓</th><th colspan="2">可達率 ↑</th></tr>
-           <tr><th></th><th>PhyScene</th><th>GRT</th><th>PhyScene</th><th>GRT</th><th>PhyScene</th><th>GRT</th></tr></thead>
+    <thead><tr><th rowspan="2">房型</th><th colspan="2">Col_obj ↓</th><th colspan="2">R_out ↓</th><th colspan="2">可達率 ↑</th><th colspan="2">可走比 ↑</th></tr>
+           <tr><th>PhyScene</th><th>GRT</th><th>PhyScene</th><th>GRT</th><th>PhyScene</th><th>GRT</th><th>PhyScene</th><th>GRT</th></tr></thead>
     <tbody>
-      <tr class="base"><td>真實 3D-FRONT（基準）</td><td class="n" colspan="2">0.400</td><td class="n" colspan="2">0.129</td><td class="n" colspan="2">—</td></tr>
-      <tr><td>矩形</td><td class="n">0.435</td><td class="n"><span class="w">0.207</span></td><td class="n">0.012</td><td class="n"><span class="w">0.000</span></td><td class="n"><span class="w">0.976</span></td><td class="n">0.949</td></tr>
-      <tr><td>梯形</td><td class="n">0.429</td><td class="n"><span class="w">0.207</span></td><td class="n">0.125</td><td class="n"><span class="w">0.092</span></td><td class="n">0.881</td><td class="n"><span class="w">0.950</span></td></tr>
-      <tr><td>T 形</td><td class="n">0.458</td><td class="n"><span class="w">0.237</span></td><td class="n"><span class="w">0.214</span></td><td class="n">0.252</td><td class="n"><span class="w">0.905</span></td><td class="n">0.878</td></tr>
-      <tr><td>L 形</td><td class="n">0.542</td><td class="n"><span class="w">0.237</span></td><td class="n"><span class="w">0.226</span></td><td class="n">0.270</td><td class="n"><span class="w">0.940</span></td><td class="n">0.829</td></tr>
-      <tr><td>1:4 狹長走廊</td><td class="n">0.556</td><td class="n"><span class="w">0.518</span></td><td class="n">0.556</td><td class="n"><span class="w">0.255</span></td><td class="n"><span class="w">0.870</span></td><td class="n">0.767</td></tr>
+      <tr class="base"><td>真實 3D-FRONT（基準）</td><td class="n" colspan="2">0.400</td><td class="n" colspan="2">0.129</td><td class="n" colspan="2">—</td><td class="n" colspan="2">0.940</td></tr>
+      <tr><td>矩形</td><td class="n">0.435</td><td class="n"><span class="w">0.139</span></td><td class="n">0.012</td><td class="n"><span class="w">0.000</span></td><td class="n">0.976</td><td class="n"><span class="w">0.984</span></td><td class="n">1.000</td><td class="n">1.000</td></tr>
+      <tr><td>梯形</td><td class="n">0.429</td><td class="n"><span class="w">0.142</span></td><td class="n">0.125</td><td class="n"><span class="w">0.092</span></td><td class="n">0.881</td><td class="n"><span class="w">0.979</span></td><td class="n">1.000</td><td class="n">1.000</td></tr>
+      <tr><td>T 形</td><td class="n">0.458</td><td class="n"><span class="w">0.154</span></td><td class="n"><span class="l">0.214</span></td><td class="n">0.259</td><td class="n">0.905</td><td class="n"><span class="w">0.915</span></td><td class="n">1.000</td><td class="n">1.000</td></tr>
+      <tr><td>L 形</td><td class="n">0.542</td><td class="n"><span class="w">0.178</span></td><td class="n"><span class="l">0.226</span></td><td class="n">0.246</td><td class="n">0.940</td><td class="n">0.939</td><td class="n">1.000</td><td class="n">0.980</td></tr>
+      <tr><td>1:4 狹長走廊</td><td class="n">0.556</td><td class="n"><span class="w">0.456</span></td><td class="n">0.556</td><td class="n"><span class="w">0.184</span></td><td class="n"><span class="l">0.870</span></td><td class="n">0.723</td><td class="n"><span class="l">1.000</span></td><td class="n">0.789</td></tr>
     </tbody>
   </table>
-  <caption>每種房型 12 個場景。GRT 檢查點 <code>outputs/grt3/crt_best.pt</code>（epoch 43）；<code>eval_grt.py --mode shapes</code>。</caption></div>
+  <caption>每種房型 12 個場景。GRT = run 6 檢查點（<code>outputs/grt6/crt_best.pt</code>，epoch 50）；<code>eval_grt.py --mode shapes</code>。<strong>碰撞 5:0、出界 3:2、可達 3 勝 1 平 1 敗、可走 3 勝 2 敗。</strong></caption></div>
 
   <h3>贏在哪</h3>
-  <p><strong>碰撞率：五個房型全勝，而且不是小勝。</strong>GRT 在四個房型上（0.207–0.237）不只低於 PhyScene（0.429–0.542），也低於<strong>真實 3D-FRONT 佈局的 0.400</strong>。這是 PhyScene 明確以引導最佳化的軸線，值得注意。狹長走廊差距最小（0.518 對 0.556）——那也是兩邊都最吃力的房型。</p>
-  <p><strong>狹長走廊的出界率減半以上</strong>：0.255 對 0.556。PhyScene 在該房型有超過半數物件落在樓面外；GRT 因為從來源佈局的仿射轉置出發、再對邊界做交叉注意，房型偏離分布時不會失去參照。</p>
-  <p><strong>語意保留：PhyScene 沒有這個機制。</strong>GRT 的 S<sub>motif</sub> = 1.000、S<sub>rel</sub> = 0.935 ± 0.030（uniform，N=36）。PhyScene 生成的場景與來源房間無關，這一欄不是分數高低而是<strong>能力缺口</strong>。</p>
+  <p><strong>碰撞率五個房型全勝，而且差距很大。</strong>GRT 在四個房型上（0.139–0.178）不只遠低於 PhyScene（0.429–0.542），也低於<strong>真實 3D-FRONT 佈局的 0.400</strong>。這是 PhyScene 明確以引導最佳化的軸線。</p>
+  <p><strong>狹長走廊的出界率降到三分之一</strong>：0.184 對 0.556。PhyScene 在該房型有超過半數物件落在樓面外；GRT 從來源佈局的仿射轉置出發、再對邊界做交叉注意，房型偏離分布時不會失去參照。</p>
+  <p><strong>可達率已由 run 6 修好</strong>：run 3 是五個房型輸四個，run 6 變成三勝一平一敗（梯形 0.979 對 0.881、矩形 0.984 對 0.976、T 形 0.915 對 0.905）。</p>
+  <p><strong>語意保留：PhyScene 沒有這個機制。</strong>GRT 在 uniform 協定下 S<sub>motif</sub> = 1.000、S<sub>rel</sub> = 0.936 ± 0.039。PhyScene 生成的場景與來源房間無關，這一欄不是分數高低而是<strong>能力缺口</strong>。</p>
+
+  <h3>run 6 相對 run 3：一個真實的取捨</h3>
+  <div class="tw"><table>
+    <thead><tr><th>協定 / 指標</th><th>run 3</th><th>run 6</th><th></th></tr></thead>
+    <tbody>
+      <tr><td>shapes · Col_obj ↓</td><td class="n">0.281</td><td class="n"><span class="w">0.214</span></td><td>改善</td></tr>
+      <tr><td>shapes · R_out ↓</td><td class="n">0.174</td><td class="n"><span class="w">0.156</span></td><td>改善</td></tr>
+      <tr><td>shapes · 可達率 ↑</td><td class="n">0.875</td><td class="n"><span class="w">0.908</span></td><td>改善（本輪目標）</td></tr>
+      <tr><td>shapes · S<sub>rel</sub> ↑</td><td class="n">0.851</td><td class="n"><span class="l">0.827</span></td><td>退步</td></tr>
+      <tr><td>shapes · S<sub>motif</sub> ↑</td><td class="n">0.978</td><td class="n"><span class="l">0.960</span></td><td>退步</td></tr>
+      <tr class="hi"><td>hard（非凸）· R_col ↓</td><td class="n"><span class="w">2.085%</span></td><td class="n"><span class="l">3.805%</span></td><td><strong>不再達標</strong>（判準 ≤ 2.83%）</td></tr>
+      <tr><td>hard · R_out ↓</td><td class="n">0.508</td><td class="n"><span class="w">0.391</span></td><td>改善</td></tr>
+      <tr><td>hard · 可達率 ↑</td><td class="n">0.694</td><td class="n"><span class="w">0.780</span></td><td>改善</td></tr>
+    </tbody>
+  </table>
+  <caption>run 6 用最難房型的碰撞、換來包容性與可達性。兩個檢查點都保留，正式稿要報哪一個取決於主張哪一軸。</caption></div>
 
   <div class="note warn">
-    <h4>輸在哪（如實報告）</h4>
-    <p><strong>可達率</strong>：五個房型輸四個（走廊 0.767 對 0.870，L 形 0.829 對 0.940）。PhyScene 直接在光柵網格上以引導最佳化可達性，而 GRT 優化的是 blocked <em>面積</em>——不是同一個量。run 4 正在處理（§6）。</p>
-    <p><strong>凹角房型的出界率</strong>：L 形 0.270 對 0.226、T 形 0.252 對 0.214。仿射轉置在凹角處把物件推出邊界，六個精修塊沒有完全拉回。碰撞已經修好、出界還沒有，因為兩者的壓力來源不同：前者來自學習式間距這個<strong>目標</strong>，後者只透過違規<strong>特徵</strong>間接進入。run 4 正在處理（§6）。</p>
+    <h4>還沒解決的（如實報告）</h4>
+    <p><strong>凹角房型的出界率仍然輸</strong>：L 形 0.246 對 0.226、T 形 0.259 對 0.214。這是 run 6 的兩個目標之一，<strong>沒有達成</strong>。走廊大幅改善（0.556→0.184）而 L／T 沒有，指向凹角本身而非一般性的包容性問題。</p>
+    <p><strong>狹長走廊的可走比與可達率</strong>：0.789 / 0.723 對 PhyScene 的 1.000 / 0.870。走廊是唯一 GRT 在這兩軸都輸的房型，也是兩邊都最吃力的房型。</p>
+    <p><strong>非凸碰撞不再達標</strong>：hard 協定 R_col 由 run 3 的 2.085% 升到 3.805%，超過 project4 加投影後的 2.83%。這是本輪修正的直接代價。</p>
   </div>
 
   <div class="note">
     <h4>對 project4 失敗判準的檢核</h4>
-    <p>判準是「無後處理的可行性 ≥ project4 <em>加了</em> Π<sub>θ</sub> 之後的水準，尤其在非凸房型（2.83%）」。GRT 在 hard／L 形上的 R_col 為 <strong>2.09%</strong>，uniform 為 2.98%——<strong>達標</strong>，且不需要任何測試期投影。S<sub>rel</sub><sup>kept</sup> 0.935 未退步，速度為單次前向。</p>
+    <p>判準是「無後處理的可行性 ≥ project4 <em>加了</em> Π<sub>θ</sub> 之後的水準，尤其在非凸房型（2.83%）」。<strong>run 3 達標</strong>（hard R_col 2.09%），<strong>run 6 不達標</strong>（3.81%）。兩者都不需要任何測試期投影，S<sub>rel</sub><sup>kept</sup> 皆未退步，速度皆為單次前向。目前沒有一個檢查點同時拿下「非凸碰撞達標」與「可達率贏 PhyScene」——這是下一輪的問題。</p>
   </div>
 </section>
 
@@ -463,7 +482,7 @@ a{color:var(--accent)}
     <div class="entry">
       <span class="tag">run 6</span>
       <div>
-        <h4>改目標，不是改權重 <span class="chip c-run">訓練中</span></h4>
+        <h4>改目標，不是改權重 <span class="chip c-done">已評測</span></h4>
         <p>兩個量測解釋了 run 4／5 的失敗。</p>
         <p><strong>（一）我一直照損失「數值」配權重，但決定訓練的是梯度。</strong>逐項量未加權的梯度範數：</p>
         <div class="tw"><table>
@@ -479,6 +498,8 @@ a{color:var(--accent)}
         <caption>可行性側對重建約 <strong>20 : 1</strong>，而我從損失數值算出來的是 5 : 4。順帶一提，原本懷疑是 straight-through 硬 gate 讓特徵在六個 block 各回傳一次爆炸梯度——<strong>量了之後證明不是</strong>（關掉特徵梯度 5.09→5.01）。</caption></div>
         <p><strong>（二）更根本的：真實佈局的 <code>rch</code> 就是 0.19，不是 0。</strong>我卻在要求模型把它壓到零——那等於逼它比任何真實房間都更攤開。這就是 <code>bnd</code> 被推壞的原因：<code>rch</code> 想把家具分開、<code>bnd</code> 想把它們拉回牆內，兩股力打架，妥協解就是「攤開而且部分出界」。</p>
         <p>因此三個物理項改為<strong>只懲罰超出同一房間真實佈局的部分</strong>：<code>relu(f(x) − f(x_gt))</code>。達到真實水準即歸零、不再推。<strong>讓語料定義何謂正確</strong>——與學習式間距同一個原則。權重則改照量到的梯度範數配（<code>w_recon</code> 4.0 成為最大單項拉力）。</p>
+        <p><strong>推論成立。</strong>訓練指標全面優於歷來各輪：<code>recon</code> 0.0092（run 3 為 0.0398）、<code>val_recon</code> 0.0098（0.109）、<code>rel</code> 0.0030（0.0075）、<code>bnd</code> 0.0184、<code>rch</code> 0.0036——物理項幾乎歸零，代表佈局已達真實佈局的物理水準。位移 0.239 m。</p>
+        <p><strong>但評測顯示這是取捨而非全勝</strong>：可達率修好了（§5），凹角出界率沒有，而且最難房型的碰撞退步到不再達標。詳見 §5。</p>
       </div>
     </div>
   </div>
@@ -518,7 +539,9 @@ a{color:var(--accent)}
   <h3>未決項</h3>
   <ul>
     <li><span class="chip c-done">已量測</span> GRT 在與 PhyScene <strong>完全相同</strong>的五個合成房型上的對照（§5）</li>
-    <li><span class="chip c-run">run 6 訓練中</span> <strong>可達率</strong>與<strong>凹角出界率</strong>：物理項改為只懲罰超出真實佈局的部分，權重照梯度範數配（§6）</li>
+    <li><span class="chip c-done">已達成</span> <strong>可達率</strong>：run 3 五輸一勝 → run 6 三勝一平一敗（§5）</li>
+    <li><span class="chip c-run">未解</span> <strong>凹角出界率</strong>：L／T 形仍輸 PhyScene。走廊大幅改善而 L／T 沒有，指向凹角本身</li>
+    <li><span class="chip c-run">未解</span> <strong>非凸碰撞回到達標</strong>：run 6 為 3.81%，超過 2.83% 判準。需要同時拿下碰撞與可達性的設定</li>
     <li><span class="chip c-wait">待量測</span> PhyScene 生成場景對來源房間的語意保留——這張表展示的是<strong>能力缺口</strong>而非分數高低</li>
     <li><span class="chip c-wait">受阻</span> PhyScene 的 mesh 級碰撞引導需 3D-FUTURE 網格資產（44 GB，未下載）；不影響出界率結論，但需在稿中聲明</li>
   </ul>
