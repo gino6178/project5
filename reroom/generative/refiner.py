@@ -28,12 +28,13 @@ import torch.nn as nn
 
 from .graphcore import (GraphAttention, PairGapPredictor, dense_edges,
                         graph_violation)
+from .floorgraph import FLOOR_DIM
 from .tokens import CATS, TOKEN_COND_DIM
 
 __all__ = ["GraphRefinementTransformer", "violation_features"]
 
 STATE_DIM = 4          # (u, v, cos yaw, sin yaw)
-N_VIOL = 9             # see violation_features
+N_VIOL = 11            # see violation_features
 
 
 def violation_features(x, batch, predictor, use_walk: bool = True):
@@ -50,6 +51,11 @@ def violation_features(x, batch, predictor, use_walk: bool = True):
         7  metres the worst oriented-box corner pokes outside the room
         8  this object's own soft reachability, the differentiable analogue of
            the per-object quantity PhyScene's R_reach counts
+        9,10 offset in metres to the nearest UNOCCUPIED free-space node -- where
+           there is floor to move to. Objects stranded in a region the target
+           room does not have need a 0.3-1.9 m relocation (measured on L and T
+           rooms), and boundary samples say where the walls are, never where
+           there is space.
 
     These are *features*, not a loss: the blocks consume them and learn the
     correction.
@@ -99,8 +105,21 @@ def violation_features(x, batch, predictor, use_walk: bool = True):
         near_blocked = torch.zeros_like(wall_dist)
         obj_reach = torch.ones_like(wall_dist)
 
+    # ---- where is there free floor to move to? ----
+    fp = batch["floor_pts"]                                     # (B,M,2) metres
+    fw = torch.exp(batch["cond"][..., 0]).amax(dim=1)            # (B,) coarse size
+    d_of = ((p[:, :, None, :] - fp[:, None, :, :]) ** 2).sum(-1).clamp(min=1e-12).sqrt()
+    # a node is taken if some object already sits on it
+    occ_f = torch.sigmoid((r[:, :, None] - d_of) * 4.0) * mask[..., None]
+    free_f = (1.0 - occ_f.amax(dim=1)).clamp(0.0, 1.0)           # (B,M)
+    cost = d_of + (1.0 - free_f)[:, None, :] * fw[:, None, None]
+    k_free = cost.argmin(-1)                                    # detached choice
+    tgt = torch.gather(fp, 1, k_free[..., None].expand(-1, -1, 2))
+    to_free = tgt - p                                           # (B,N,2) metres
+
     v = torch.stack([v_pair, clearance, near_n[..., 0], near_n[..., 1],
-                     wall_dist, strain, near_blocked, outside, obj_reach], dim=-1)
+                     wall_dist, strain, near_blocked, outside, obj_reach,
+                     to_free[..., 0], to_free[..., 1]], dim=-1)
     return v * mask[..., None]
 
 
@@ -112,9 +131,9 @@ class RefinementBlock(nn.Module):
         self.cross_attn = nn.MultiheadAttention(d, heads, batch_first=True)
         self.ff = nn.Sequential(nn.Linear(d, 4 * d), nn.SiLU(), nn.Linear(4 * d, d))
 
-    def forward(self, h, bnd, dense_edge, key_pad):
+    def forward(self, h, ctx, dense_edge, key_pad):
         h = h + self.graph_attn(self.n1(h), dense_edge, key_pad)
-        c, _ = self.cross_attn(self.n2(h), bnd, bnd, need_weights=False)
+        c, _ = self.cross_attn(self.n2(h), ctx, ctx, need_weights=False)
         h = h + c
         return h + self.ff(self.n3(h))
 
@@ -133,6 +152,14 @@ class GraphRefinementTransformer(nn.Module):
         self.in_proj = nn.Linear(STATE_DIM + TOKEN_COND_DIM + 64 + N_VIOL, d_model)
         self.step_emb = nn.Embedding(n_blocks, d_model)
         self.bnd_proj = nn.Sequential(nn.Linear(6, 128), nn.SiLU(), nn.Linear(128, d_model))
+        # Free space is context the objects attend over, alongside the walls, and
+        # its own edges are propagated first so a node's embedding carries the
+        # room's topology -- the notch of an L is reachable only through its
+        # throat, which euclidean proximity to a wall sample cannot express.
+        self.flr_proj = nn.Sequential(nn.Linear(FLOOR_DIM, 128), nn.SiLU(),
+                                      nn.Linear(128, d_model))
+        self.flr_mp = nn.ModuleList([nn.Linear(d_model, d_model) for _ in range(2)])
+        self.ctx_kind = nn.Embedding(2, d_model)      # wall vs floor
         self.blocks = nn.ModuleList([RefinementBlock(d_model, heads) for _ in range(n_blocks)])
         self.head = nn.Sequential(nn.LayerNorm(d_model), nn.Linear(d_model, d_model // 2),
                                   nn.SiLU(), nn.Linear(d_model // 2, STATE_DIM))
@@ -146,7 +173,13 @@ class GraphRefinementTransformer(nn.Module):
         x = cond[..., 10:14].clone()               # affine transplant of the reference
         de, em = dense_edges(batch, N)
         dense_edge = torch.cat([de, em[..., None]], dim=-1)
-        bnd = self.bnd_proj(batch["boundary"])
+        bnd = self.bnd_proj(batch["boundary"]) + self.ctx_kind.weight[0]
+        f = self.flr_proj(batch["floor"])
+        adj = batch["floor_adj"]
+        deg = adj.sum(-1, keepdim=True).clamp(min=1.0)
+        for mp in self.flr_mp:                        # propagate over visibility
+            f = f + torch.tanh(mp(torch.bmm(adj, f) / deg))
+        ctx = torch.cat([bnd, f + self.ctx_kind.weight[1]], dim=1)
         key_pad = ~mask
         ce = self.cat_emb(cat)
         trace = []
@@ -154,7 +187,7 @@ class GraphRefinementTransformer(nn.Module):
             v = violation_features(x, batch, self.gap, use_walk=self.use_walk)
             h = self.in_proj(torch.cat([x, cond, ce, v], dim=-1))
             h = h + self.step_emb.weight[l][None, None, :]
-            h = blk(h, bnd, dense_edge, key_pad)
+            h = blk(h, ctx, dense_edge, key_pad)
             x = x + self.head(h) * mask[..., None].float()
             if return_trace:
                 trace.append(x)

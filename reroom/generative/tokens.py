@@ -32,6 +32,7 @@ from shapely.geometry import LineString
 
 from ..core.categories import PRIORS, ROOM_TYPES, prior
 from ..core.scene import Room, Scene
+from .floorgraph import FLOOR_DIM, N_FLOOR, floor_nodes
 from ..geom.polygon import (as_polygon, floor_descriptor,
                             min_rotated_rect_params, object_polygon)
 from ..intent.relations import RELATION_TYPES
@@ -161,11 +162,30 @@ class TokenBatch:
     edge_feat: np.ndarray        # (E, EDGE_DIM)
     glob: np.ndarray             # (GLOBAL_DIM,)
     boundary: np.ndarray         # (N_BOUNDARY, 4)
+    floor: np.ndarray            # (N_FLOOR, FLOOR_DIM) free-space nodes
+    floor_adj: np.ndarray        # (N_FLOOR, N_FLOOR) visibility edges
+    floor_pts: np.ndarray        # (N_FLOOR, 2) same nodes, world metres
+    floor_r: float               # covering radius, metres
     room_type: int
     mask: np.ndarray             # (N,) bool -- valid tokens
     mgrp: np.ndarray             # (N,) int -- motif group id, -1 for none
     parent: np.ndarray           # (N,) int -- parent (head) token index, -1 none
     meta: dict
+
+
+def _floor_fields(target_room: Room, fr_tgt) -> dict:
+    """Free-space nodes for the target room.
+
+    Objects stranded in a region the target room does not have need a large,
+    deliberate relocation, not a local nudge: measured on the run 6 checkpoint,
+    the objects still outside an L or T room sit a median 0.47 m / 0.31 m past
+    the wall and up to 1.9 m, while the corridor's offenders -- a pure squeeze --
+    sit 0.09 m out. Boundary samples tell the model where the walls are; nothing
+    told it where there is floor to move TO. These nodes are that.
+    """
+    feat, adj, cover_r, pts = floor_nodes(target_room, fr_tgt)
+    return {"floor": feat, "floor_adj": adj, "floor_pts": pts,
+            "floor_r": float(cover_r)}
 
 
 def build_tokens(intent: DesignIntent, target_room: Room,
@@ -267,6 +287,7 @@ def build_tokens(intent: DesignIntent, target_room: Room,
         if target_room.room_type in ROOM_TYPES else len(ROOM_TYPES) - 1
     return TokenBatch(state=state, cat=cat, motif=motif, cond=cond,
                       edge_index=ei, edge_feat=ef, glob=glob,
+                      **_floor_fields(target_room, fr_tgt),
                       boundary=boundary_samples(target_room),
                       room_type=rt, mask=mask, mgrp=mgrp, parent=parent,
                       meta={"frame_tgt": fr_tgt, "frame_src": fr_src,
@@ -297,6 +318,10 @@ def collate(items: list[TokenBatch], device=None):
     edge_mask = z(B, E, dtype=torch.bool)
     glob = z(B, GLOBAL_DIM)
     boundary = z(B, N_BOUNDARY, 6)
+    floor = z(B, N_FLOOR, FLOOR_DIM)
+    floor_adj = z(B, N_FLOOR, N_FLOOR)
+    floor_pts = z(B, N_FLOOR, 2)
+    floor_r = z(B)
     rt = z(B, dtype=torch.long)
     frame_h = z(B, 2)                       # metric half-sizes (h1, h2)
     present1 = z(B, N)                       # D1 existence target (0 in padding)
@@ -318,6 +343,10 @@ def collate(items: list[TokenBatch], device=None):
             edge_mask[b, :e] = True
         glob[b] = torch.as_tensor(it.glob)
         boundary[b] = torch.as_tensor(it.boundary)
+        floor[b] = torch.as_tensor(it.floor)
+        floor_adj[b] = torch.as_tensor(it.floor_adj)
+        floor_pts[b] = torch.as_tensor(it.floor_pts)
+        floor_r[b] = it.floor_r
         rt[b] = it.room_type
         fr = it.meta.get("frame_tgt")
         if fr is not None:
@@ -325,5 +354,7 @@ def collate(items: list[TokenBatch], device=None):
     return {"state": state, "cond": cond, "cat": cat, "motif": motif,
             "mask": mask, "edge_feat": edge_feat, "edge_index": edge_index,
             "edge_mask": edge_mask, "glob": glob, "boundary": boundary,
+            "floor": floor, "floor_adj": floor_adj, "floor_pts": floor_pts,
+            "floor_r": floor_r,
             "room_type": rt, "frame_h": frame_h, "mgrp": mgrp,
             "parent": parent, "present1": present1}
