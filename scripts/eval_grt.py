@@ -29,14 +29,41 @@ from reroom.core.scene import Scene
 ap = argparse.ArgumentParser()
 ap.add_argument("--ckpt", default="outputs/crt_walk/crt_best.pt")
 ap.add_argument("--seeds", default="6,8,25,2,10,14,1,3,5,7,9,11")
-ap.add_argument("--mode", default="uniform", choices=["uniform", "aniso", "hard"])
+ap.add_argument("--mode", default="uniform",
+                choices=["uniform", "aniso", "hard", "shapes"])
 a = ap.parse_args()
 
 SIZES = {"uniform": [0.75, 1.0, 1.35],
          "aniso":   [(1.5, 0.75), (0.75, 1.5), (1.7, 0.85), (0.85, 1.7)]}
 
+# The exact rooms PhyScene was measured on (ps_shapes.py), in metres, so the two
+# systems are compared on identical geometry with identical metrics.
+PX_PER_M = 256.0 / 12.6
+
+
+def _named_shapes(margin=0.12, S=256):
+    a, b = S * margin, S * (1 - margin)
+    w = b - a
+    P = {}
+    P["rect"] = [(a, a), (b, a), (b, b), (a, b)]
+    P["L-shape"] = [(a, a), (b, a), (b, a + w * .5), (a + w * .5, a + w * .5),
+                    (a + w * .5, b), (a, b)]
+    P["T-shape"] = [(a, a), (b, a), (b, a + w * .45), (a + w * .72, a + w * .45),
+                    (a + w * .72, b), (a + w * .28, b), (a + w * .28, a + w * .45),
+                    (a, a + w * .45)]
+    P["trapezoid"] = [(a, a), (b, a), (b - w * .35, b), (a + w * .1, b)]
+    cy, hh = S * .5, w * .125
+    P["corridor 1:4"] = [(a, cy - hh), (b, cy - hh), (b, cy + hh), (a, cy + hh)]
+    return {k: np.array([[(px - S / 2) / PX_PER_M, (py - S / 2) / PX_PER_M]
+                         for px, py in v], dtype=float) for k, v in P.items()}
+
 
 def mkroom(r, s):
+    if isinstance(s, np.ndarray):                      # a named synthetic shape
+        an = _anchor_openings(r)
+        return Room(polygon=s, height=r.height,
+                    openings=_replace_openings(s, an, len(r.polygon)),
+                    room_type=r.room_type)
     if s == "L":
         p = corner_cut(r.polygon, 0, 0.5, 0.5, 0.0)
     elif isinstance(s, (tuple, list)):
@@ -83,14 +110,20 @@ model = GraphRefinementTransformer(cfg.get("d_model", 384), cfg.get("n_blocks", 
 model.load_state_dict(ck.get("ema", ck["model"])); model.eval()
 print(f"loaded {a.ckpt} (epoch {ck.get('epoch')})", flush=True)
 
-sizes = SIZES.get(a.mode, ["L"]) if a.mode != "hard" else ["L"]
+if a.mode == "shapes":
+    named = _named_shapes()
+    sizes = list(named.values()); size_names = list(named.keys())
+else:
+    sizes = SIZES.get(a.mode, ["L"]) if a.mode != "hard" else ["L"]
+    size_names = [str(x) for x in sizes]
 K = ("S_rel", "S_rel_kept", "S_motif", "R_col", "ps_Col_obj", "ps_R_out",
      "ps_R_walkable", "ps_R_reach")
 rows = {k: [] for k in K}
+per = {}
 for sd in seeds:
     try:
         src = test[sd]; g = build_motifs(build_scene_graph(src))
-        for s in sizes:
+        for si, s in enumerate(sizes):
             room = mkroom(src.room, s)
             out = run(model, g, room, el, dev)
             m = evaluate(g, out); pm = physcene_metrics(out)
@@ -98,6 +131,7 @@ for sd in seeds:
             rows["S_motif"].append(m.get("S_motif", np.nan)); rows["R_col"].append(100 * m["R_col"])
             for k in ("ps_Col_obj", "ps_R_out", "ps_R_walkable", "ps_R_reach"):
                 rows[k].append(pm[k])
+            per.setdefault(size_names[si], []).append(pm)
     except Exception as e:
         print("skip", sd, repr(e)[:70], flush=True)
 
@@ -110,4 +144,11 @@ print(f"\nGRT ({a.mode}), N={n} cells — ONE forward pass, no post-processing")
 for k in K:
     m, s = mn(rows[k])
     print(f"  {k:<14} {m:8.3f} ± {s:.3f}")
+if per:
+    print("\nper shape (same rooms and metric as the PhyScene sweep):")
+    print(f"  {'shape':<16}{'Col_obj':>9}{'R_out':>9}{'walk':>8}{'reach':>8}")
+    for nm, lst in per.items():
+        f = lambda k: float(np.nanmean([r[k] for r in lst]))
+        print(f"  {nm:<16}{f('ps_Col_obj'):9.3f}{f('ps_R_out'):9.3f}"
+              f"{f('ps_R_walkable'):8.3f}{f('ps_R_reach'):8.3f}")
 print("DONE_GRT_EVAL")
