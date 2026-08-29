@@ -183,8 +183,11 @@ def _floor_fields(target_room: Room, fr_tgt) -> dict:
     sit 0.09 m out. Boundary samples tell the model where the walls are; nothing
     told it where there is floor to move TO. These nodes are that.
     """
-    feat, adj, cover_r, pts = floor_nodes(target_room, fr_tgt)
-    return {"floor": feat, "floor_adj": adj, "floor_pts": pts,
+    feat, adj, cover_r, _world = floor_nodes(target_room, fr_tgt)
+    # columns 2:4 are the nodes in frame-basis metres (u*h1, v*h2), the same
+    # convention object centres and boundary samples use. The world-metre
+    # positions are for geometry checks only and must not reach the model.
+    return {"floor": feat, "floor_adj": adj, "floor_pts": feat[:, 2:4].copy(),
             "floor_r": float(cover_r)}
 
 

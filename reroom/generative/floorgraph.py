@@ -87,10 +87,12 @@ def floor_nodes(room: Room, frame, m: int = N_FLOOR, robot: float = 0.3):
     the nearest node. Containment is charged only beyond this, so the sampling
     density never masquerades as a violation.
 
-    ``pts`` (m, 2): the same nodes in world metres. Returned explicitly because
-    rebuilding them from the normalised pair needs the frame axes, and doing that
-    by hand is an easy place to drop the rotation -- which is exactly the bug
-    that made the first version of check_concave.py report nonsense.
+    ``pts_world`` (m, 2): the same nodes in WORLD metres, for geometry checks
+    against shapely. Note that everything on the model side works in frame-basis
+    metres ``(u*h1, v*h2)`` -- object centres, boundary samples and columns 2:4 of
+    ``feat`` all use that convention -- so the model must be fed those, never
+    these. Mixing the two put objects a mean 4.9 m from their nearest node when
+    the covering radius was 0.52 m.
     """
     poly = as_polygon(room)
     stand = erode(poly, robot * 0.5)
@@ -129,4 +131,4 @@ def floor_nodes(room: Room, frame, m: int = N_FLOOR, robot: float = 0.3):
     v = (rel @ frame.axis2) / max(float(frame.half2), 1e-6)
     feat = np.stack([u, v, u * frame.half1, v * frame.half2, clear, deg],
                     axis=-1).astype(np.float32)
-    return feat, adj, np.float32(cover_r), pts.astype(np.float32)
+    return feat, adj, np.float32(cover_r), pts.astype(np.float32)   # pts = WORLD

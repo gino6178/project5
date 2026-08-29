@@ -47,7 +47,7 @@ for k in range(64):
     nb.append(n)
 nb = np.array(nb)
 
-feat, adj, cover_r, fpts = floor_nodes(room, fr, m=48, robot=0.3)
+feat, adj, cover_r, fpts = floor_nodes(room, fr, m=48, robot=0.3)   # world metres
 
 
 def truth(p):
