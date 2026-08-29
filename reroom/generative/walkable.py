@@ -96,13 +96,18 @@ def soft_reachability(free, seed, rounds: int | None = None, barrier: float = 12
     connected. Reachability must advance one cell at a time; the grid is kept
     small (32x32) so ~1.5*G rounds stay cheap.
 
-    ``barrier`` sharpens the map used for propagation, because the soft footprint
-    edges are otherwise semi-transparent; the measurement still uses the smooth
-    free map so gradients survive.
+    The gate is applied straight-through: hard in value, soft in gradient. A
+    purely soft gate ATTENUATES WITH DISTANCE and silently under-reports reach --
+    even a fully free cell gives sigmoid(0.5*barrier) = 0.9975, which over 72
+    rounds compounds to 0.835, and a cell at free=0.9 decays to 0.55. Measured
+    against real 3D-FRONT layouts the soft version read 0.393 where the metric
+    says ~0.94: distant objects looked walled off purely from the decay. Hard
+    propagation carries a 1 unattenuated; the soft term keeps the gradient.
     """
     G = free.shape[-1]
-    rounds = rounds or int(1.5 * G)
-    gate = torch.sigmoid((free - 0.5) * barrier)
+    rounds = rounds or int(2 * G)
+    soft = torch.sigmoid((free - 0.5) * barrier)
+    gate = (soft > 0.5).float().detach() + (soft - soft.detach())
     r = seed
     for _ in range(rounds):
         r = F.max_pool2d(r, kernel_size=3, stride=1, padding=1)
