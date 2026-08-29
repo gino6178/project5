@@ -38,7 +38,21 @@ print(f"[crt] scenes={len(scenes)} train={len(tr)} val={len(va)}", flush=True)
 # come from the feasibility terms, so they are raised sharply. That was unsafe
 # before, when a category-blind energy fought reconstruction; with the learned
 # per-pair spacing (trained on real layouts) the two objectives now agree.
-# Run 6 changes the objective, not the weights. Run 5 held relations (rel 0.033)
+# Run 7 changes ONLY the architecture: free-space nodes as attendable context,
+# with run 6's objective and weights untouched, so whatever moves is attributable
+# to the nodes. The reason is measured, not assumed: the objects still outside an
+# L or T room sit a median 0.47 m / 0.31 m past the wall and up to 1.9 m, while
+# the corridor's sit 0.09 m out. Those are not shallow offenders a local nudge
+# fixes -- they are stranded in the quadrant the target room does not have, and
+# escaping needs a deliberate relocation to somewhere. Boundary samples say where
+# the walls are and never where there is floor to go to.
+#
+# Two earlier explanations were tested and refuted first: that the halfplane
+# containment predicate breaks at reflex corners (it matches shapely exactly), and
+# that the offenders are shallow so the loss and the metric disagree (they are
+# deep).
+#
+# Run 6 changed the objective, not the weights. Run 5 held relations (rel 0.033)
 # and recovered val_recon (0.116), but bnd stayed 3.7x worse than the affine
 # transplant it starts from and recon stuck at 0.34 where run 3 reached 0.04.
 # Two measurements explain it. Gradient norms per term, unweighted: recon 0.94,
@@ -72,6 +86,6 @@ cfg = CRTConfig(epochs=60, batch=128, lr=3.0e-4, d_model=384, n_blocks=6, heads=
                 w_recon=4.0, w_terminal=1.0, w_monotone=0.5, w_relation=3.0,
                 w_walk=0.3, w_gap=1.0, weight_decay=3.0e-4,
                 w_bound=1.0, w_reach=0.6, walk_G=48, robot=0.3,
-                workers=0, out="outputs/grt6")
+                workers=0, out="outputs/grt7")
 train_crt(tr, va, cfg, elasticity=el)
 print("[crt] DONE", flush=True)
