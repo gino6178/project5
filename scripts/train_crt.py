@@ -38,10 +38,25 @@ print(f"[crt] scenes={len(scenes)} train={len(tr)} val={len(va)}", flush=True)
 # come from the feasibility terms, so they are raised sharply. That was unsafe
 # before, when a category-blind energy fought reconstruction; with the learned
 # per-pair spacing (trained on real layouts) the two objectives now agree.
+# Run 5 rebalances run 4, which failed by epoch 4 and never recovered: it drove
+# collision down (term 0.98 -> 0.13) by scattering objects 1.18 m, which made
+# BOTH target axes worse (bnd 0.074 -> 0.355) and tore the design apart
+# (rel 0.027 -> 0.273, recon 0.017 -> 0.404). Adding w_bound and w_reach without
+# touching the other side had raised "spread out" pressure to 7.0 against 2.0 of
+# "stay faithful", where run 3's working balance was 4.0 against 2.0.
+#
+# Two corrections. Collision needs no more pressure -- run 3 already beat
+# PhyScene on it in all five shapes (0.207-0.518 vs 0.429-0.556, four of them
+# below the real-layout baseline of 0.400) -- so w_terminal drops back to 1.0 and
+# w_walk to 0.5, the latter also because blocked area is the wrong quantity and
+# w_reach now covers what it was standing in for. And faithfulness has to scale
+# with the added feasibility pressure, so w_relation goes to 3.0. That leaves
+# 5.0 against 4.0, with the weight concentrated on the two axes actually being
+# fixed rather than on the one already won.
 cfg = CRTConfig(epochs=60, batch=128, lr=3.0e-4, d_model=384, n_blocks=6, heads=8,
-                w_recon=1.0, w_terminal=2.0, w_monotone=0.5, w_relation=1.0,
-                w_walk=2.0, w_gap=1.0, weight_decay=3.0e-4,
-                w_bound=1.5, w_reach=1.5, walk_G=48, robot=0.3,
-                workers=0, out="outputs/grt4")
+                w_recon=1.0, w_terminal=1.0, w_monotone=0.5, w_relation=3.0,
+                w_walk=0.5, w_gap=1.0, weight_decay=3.0e-4,
+                w_bound=2.0, w_reach=1.5, walk_G=48, robot=0.3,
+                workers=0, out="outputs/grt5")
 train_crt(tr, va, cfg, elasticity=el)
 print("[crt] DONE", flush=True)
