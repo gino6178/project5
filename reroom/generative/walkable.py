@@ -116,7 +116,8 @@ def soft_reachability(free, seed, rounds: int | None = None, barrier: float = 12
 
 
 def object_reachability(x, batch, G: int = 48, robot: float = 0.3,
-                        rounds: int | None = None):
+                        rounds: int | None = None, sharp: float = 12.0,
+                        dilate: int = 2):
     """Per-object soft reachability in [0,1] -- the differentiable analogue of
     PhyScene's ``R_reach``.
 
@@ -128,15 +129,22 @@ def object_reachability(x, batch, G: int = 48, robot: float = 0.3,
     0.940 / 0.870 while blocked area was already small). This targets the metric
     itself -- per object, not per unit area.
     """
-    occ, room, per = soft_occupancy(x, batch, G, pad=robot * 0.5, per_object=True)
+    occ, room, per = soft_occupancy(x, batch, G, sharp=sharp, pad=robot * 0.5,
+                                    per_object=True)
     free = (room * (1.0 - occ)).clamp(0.0, 1.0)
     B = free.shape[0]
     flat = free.reshape(B, -1)
     seed = torch.zeros_like(flat)
     seed.scatter_(1, flat.argmax(dim=1)[:, None], 1.0)
     reach = soft_reachability(free, seed.reshape_as(free) * free, rounds)
-    # an object is reachable when reachable floor touches its (inflated) footprint
-    ring = F.max_pool2d(per, kernel_size=3, stride=1, padding=1)   # (B,N,G,G)
+    # An object is reachable when reachable floor touches its footprint. The
+    # query ring must sit STRICTLY OUTSIDE the footprint: on the footprint edge
+    # free ~ 0.5, which the hard gate cuts off, so a ring one cell wide reported
+    # every object unreachable regardless of the layout.
+    ring = per
+    for _ in range(max(dilate, 1)):
+        ring = F.max_pool2d(ring, kernel_size=3, stride=1, padding=1)
+    ring = (ring - per).clamp(min=0.0)                             # (B,N,G,G)
     hit = (ring * reach).amax(dim=(2, 3))                          # (B,N)
     return hit, reach, free
 
