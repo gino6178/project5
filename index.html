@@ -189,7 +189,7 @@ a{color:var(--accent)}
     <span><b>倉庫</b> <a href="https://github.com/gino6178/project5">gino6178/project5</a></span>
     <span><b>遠端訓練樹</b> /opt/NeMo/reroom/e2e</span>
     <span><b>分支自</b> project4 @ 40d25ba</span>
-    <span><b>更新</b> 2026-08-29 · run 5 訓練中</span>
+    <span><b>更新</b> 2026-08-29 · run 6 訓練中</span>
   </div>
 </header>
 
@@ -454,9 +454,31 @@ a{color:var(--accent)}
     <div class="entry">
       <span class="tag">run 5</span>
       <div>
-        <h4>重新配權重 <span class="chip c-run">訓練中</span></h4>
+        <h4>重新配權重 <span class="chip c-dead">捨棄</span></h4>
         <p>兩個修正。<strong>碰撞不需要再加壓</strong>——run 3 已經在五個房型全勝、四個還低於真實佈局基準——所以 <code>w_terminal</code> 退回 1.0、<code>w_walk</code> 降到 0.5（後者另一個理由是 blocked <em>面積</em> 本來就是錯的量，已由 <code>w_reach</code> 取代）。<strong>忠實側必須跟著可行性壓力一起放大</strong>，<code>w_relation</code> 1.0→3.0。</p>
         <p>變成 5.0 : 4.0，而且權重集中在<strong>真正要修的兩個軸</strong>（<code>w_bound</code> 2.0、<code>w_reach</code> 1.5），而不是已經贏了的那個。</p>
+        <p><strong>關係保住了</strong>（rel 0.033、val_recon 0.116，與 run 3 相當），<strong>但 <code>bnd</code> 仍比起點差 3.7 倍、<code>recon</code> 卡在 0.34</strong>（run 3 為 0.04）。這不是權重問題。</p>
+      </div>
+    </div>
+    <div class="entry">
+      <span class="tag">run 6</span>
+      <div>
+        <h4>改目標，不是改權重 <span class="chip c-run">訓練中</span></h4>
+        <p>兩個量測解釋了 run 4／5 的失敗。</p>
+        <p><strong>（一）我一直照損失「數值」配權重，但決定訓練的是梯度。</strong>逐項量未加權的梯度範數：</p>
+        <div class="tw"><table>
+          <thead><tr><th>項</th><th>梯度範數</th><th>run 5 權重</th><th>實際拉力</th></tr></thead>
+          <tbody>
+            <tr><td>recon</td><td class="n">0.94</td><td class="n">1.0</td><td class="n"><span class="l">0.94</span></td></tr>
+            <tr><td>term（碰撞）</td><td class="n">2.45</td><td class="n">1.0</td><td class="n">2.45</td></tr>
+            <tr><td>bnd</td><td class="n">3.52</td><td class="n">2.0</td><td class="n">7.04</td></tr>
+            <tr><td>walk</td><td class="n">4.85</td><td class="n">0.5</td><td class="n">2.43</td></tr>
+            <tr><td>rch</td><td class="n">5.09</td><td class="n">1.5</td><td class="n">7.64</td></tr>
+          </tbody>
+        </table>
+        <caption>可行性側對重建約 <strong>20 : 1</strong>，而我從損失數值算出來的是 5 : 4。順帶一提，原本懷疑是 straight-through 硬 gate 讓特徵在六個 block 各回傳一次爆炸梯度——<strong>量了之後證明不是</strong>（關掉特徵梯度 5.09→5.01）。</caption></div>
+        <p><strong>（二）更根本的：真實佈局的 <code>rch</code> 就是 0.19，不是 0。</strong>我卻在要求模型把它壓到零——那等於逼它比任何真實房間都更攤開。這就是 <code>bnd</code> 被推壞的原因：<code>rch</code> 想把家具分開、<code>bnd</code> 想把它們拉回牆內，兩股力打架，妥協解就是「攤開而且部分出界」。</p>
+        <p>因此三個物理項改為<strong>只懲罰超出同一房間真實佈局的部分</strong>：<code>relu(f(x) − f(x_gt))</code>。達到真實水準即歸零、不再推。<strong>讓語料定義何謂正確</strong>——與學習式間距同一個原則。權重則改照量到的梯度範數配（<code>w_recon</code> 4.0 成為最大單項拉力）。</p>
       </div>
     </div>
   </div>
@@ -496,7 +518,7 @@ a{color:var(--accent)}
   <h3>未決項</h3>
   <ul>
     <li><span class="chip c-done">已量測</span> GRT 在與 PhyScene <strong>完全相同</strong>的五個合成房型上的對照（§5）</li>
-    <li><span class="chip c-run">run 5 訓練中</span> <strong>可達率</strong>與<strong>凹角出界率</strong>：終端項已驗證，權重已重配（§6）</li>
+    <li><span class="chip c-run">run 6 訓練中</span> <strong>可達率</strong>與<strong>凹角出界率</strong>：物理項改為只懲罰超出真實佈局的部分，權重照梯度範數配（§6）</li>
     <li><span class="chip c-wait">待量測</span> PhyScene 生成場景對來源房間的語意保留——這張表展示的是<strong>能力缺口</strong>而非分數高低</li>
     <li><span class="chip c-wait">受阻</span> PhyScene 的 mesh 級碰撞引導需 3D-FUTURE 網格資產（44 GB，未下載）；不影響出界率結論，但需在稿中聲明</li>
   </ul>
