@@ -117,35 +117,42 @@ def soft_reachability(free, seed, rounds: int | None = None, barrier: float = 12
 
 def object_reachability(x, batch, G: int = 48, robot: float = 0.3,
                         rounds: int | None = None, sharp: float = 12.0,
-                        dilate: int = 2):
+                        query: float = 1.5):
     """Per-object soft reachability in [0,1] -- the differentiable analogue of
     PhyScene's ``R_reach``.
 
-    Their metric calls an object reachable when its footprint, dilated by the
-    robot width, touches the *largest* connected free component. The blocked-area
-    ratio we optimised in run 3 is a different quantity: a layout can leave very
-    little unreachable floor while still walling an object off, which is what the
-    L-shape and corridor numbers showed (reach 0.829 / 0.767 against PhyScene's
-    0.940 / 0.870 while blocked area was already small). This targets the metric
-    itself -- per object, not per unit area.
+    Their metric calls an object reachable when the largest connected free
+    component, dilated by the robot width, touches the object's footprint. The
+    blocked-area ratio optimised in run 3 is a different quantity: a layout can
+    leave very little unreachable floor while still walling an object off, which
+    is what the L-shape and corridor numbers were (reach 0.829 / 0.767 against
+    PhyScene's 0.940 / 0.870 while blocked area was already small).
+
+    Two footprints are needed, and conflating them is what made the first version
+    read 0.32 on real layouts:
+
+    * **blockers** -- inflated by half the robot width, because a robot cannot
+      pass within that of an object. This is what free space excludes. Inflating
+      in metres reproduces PhyScene's pixel erosion at any resolution; pixel
+      erosion would need cells finer than 0.15 m, i.e. G>84 for a 12.6 m room.
+    * **query** -- inflated further, so it reaches past the blocker halo into
+      genuinely free floor. PhyScene dilates the free component instead, which
+      is the same test; doing it on the query side keeps one flood fill. With
+      the query at the blocker radius, every cell it covers has free ~ 0.5 --
+      exactly where the gate cuts off -- so every object read as unreachable.
     """
-    occ, room, per = soft_occupancy(x, batch, G, sharp=sharp, pad=robot * 0.5,
-                                    per_object=True)
+    occ, room, blockers = soft_occupancy(x, batch, G, sharp=sharp,
+                                         pad=robot * 0.5, per_object=True)
     free = (room * (1.0 - occ)).clamp(0.0, 1.0)
     B = free.shape[0]
     flat = free.reshape(B, -1)
     seed = torch.zeros_like(flat)
     seed.scatter_(1, flat.argmax(dim=1)[:, None], 1.0)
     reach = soft_reachability(free, seed.reshape_as(free) * free, rounds)
-    # An object is reachable when reachable floor touches its footprint. The
-    # query ring must sit STRICTLY OUTSIDE the footprint: on the footprint edge
-    # free ~ 0.5, which the hard gate cuts off, so a ring one cell wide reported
-    # every object unreachable regardless of the layout.
-    ring = per
-    for _ in range(max(dilate, 1)):
-        ring = F.max_pool2d(ring, kernel_size=3, stride=1, padding=1)
-    ring = (ring - per).clamp(min=0.0)                             # (B,N,G,G)
-    hit = (ring * reach).amax(dim=(2, 3))                          # (B,N)
+
+    _, _, q = soft_occupancy(x, batch, G, sharp=sharp, pad=robot * query,
+                             per_object=True)
+    hit = (q * reach).amax(dim=(2, 3))                             # (B,N)
     return hit, reach, free
 
 

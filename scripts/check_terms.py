@@ -38,14 +38,14 @@ for name, x in (("ground truth", gt), ("+0.5 m", push(gt, 0.5)),
 
 print("object_reachability -- 1 = reachable floor touches the object")
 print("  real 3D-FRONT layouts score ~0.94 on the metric this stands in for")
-print(f"  {'G/sharp/dilate':<18}{'ground truth':>14}{'half scale':>12}{'piled':>9}")
+print(f"  {'G/sharp/query':<18}{'ground truth':>14}{'half scale':>12}{'piled':>9}")
 for G in (32, 48, 64):
-    for sharp in (8.0, 12.0, 20.0):
-        for dil in (1, 2, 3):
+    for sharp in (12.0, 20.0):
+        for qf in (1.0, 1.5, 2.5):
             vals = []
             for x in (gt, gt * 0.5, gt * 0.02):
                 h = object_reachability(x, b, G=G, robot=0.3, sharp=sharp,
-                                        dilate=dil)[0]
+                                        query=qf)[0]
                 vals.append(float((h * mk).sum() / mk.sum()))
-            print(f"  {f'{G}/{sharp:g}/{dil}':<18}" +
+            print(f"  {f'{G}/{sharp:g}/q{qf:g}':<18}" +
                   "".join(f"{v:>13.3f} " for v in vals))
