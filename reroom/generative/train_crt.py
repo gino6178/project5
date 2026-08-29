@@ -129,11 +129,19 @@ def train_crt(scenes, val_scenes=None, cfg: CRTConfig | None = None, elasticity=
     best = float("inf"); step = 0; history = []
     for ep in range(cfg.epochs):
         model.train()
-        agg = {k: 0.0 for k in ("recon", "term", "mono", "rel", "walk", "gap")}
+        agg = {k: 0.0 for k in ("recon", "term", "mono", "rel", "walk", "gap", "move")}
         cnt = 0
         for batch in dl:
             batch = {k: v.to(dev, non_blocking=True) for k, v in batch.items()}
             x, trace = model(batch, return_trace=True)
+            # displacement from the affine transplant it starts at. The first run
+            # collapsed to the identity (0.048 m) and scored exactly like the
+            # affine warp, so this is logged every epoch to catch it at once.
+            with torch.no_grad():
+                x0 = batch["cond"][..., 10:14]
+                mk = batch["mask"].float()
+                move = (((x[..., :2] - x0[..., :2]).norm(dim=-1) * mk).sum()
+                        / mk.sum().clamp(min=1) * batch["frame_h"].mean())
 
             m = batch["mask"][..., None].float()
             is_child = (batch["parent"] >= 0).float()[..., None]
@@ -172,6 +180,7 @@ def train_crt(scenes, val_scenes=None, cfg: CRTConfig | None = None, elasticity=
             agg["recon"] += float(recon) * n; agg["term"] += float(term) * n
             agg["mono"] += float(mono) * n; agg["rel"] += float(rel) * n
             agg["walk"] += float(walk) * n; agg["gap"] += float(gapsup) * n
+            agg["move"] += float(move) * n
             cnt += n; step += 1
             if step % cfg.log_every == 0:
                 print(f"  ep {ep} step {step}/{steps} " +

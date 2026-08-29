@@ -22,9 +22,17 @@ print(f"[crt] scenes={len(scenes)} train={len(tr)} val={len(va)}", flush=True)
 # showed exactly that -- val_recon rose 8x while val_energy kept falling. This is
 # an objective conflict, not overfitting, so it is fixed by weighting, not by
 # regularisation. w_walk adds the rasterised blocked-walkway penalty.
-cfg = CRTConfig(epochs=60, batch=128, lr=2.0e-4, d_model=384, n_blocks=6, heads=8,
-                w_recon=1.0, w_terminal=0.4, w_monotone=0.2, w_relation=2.0,
-                w_walk=1.0, weight_decay=3.0e-4,
-                workers=0, out="outputs/crt_walk")
+# Run 2 collapsed to the identity: it moved objects 0.048 m from the affine
+# transplant it starts at and scored exactly like the affine warp (S_rel 0.934,
+# S_motif 1.000, R_col 4.69%). The cause is in the data — RetargetPairs builds the
+# reference by deforming a real room, so the affine transplant is already close to
+# the target and the reconstruction gradient is weak. The correction signal has to
+# come from the feasibility terms, so they are raised sharply. That was unsafe
+# before, when a category-blind energy fought reconstruction; with the learned
+# per-pair spacing (trained on real layouts) the two objectives now agree.
+cfg = CRTConfig(epochs=60, batch=128, lr=3.0e-4, d_model=384, n_blocks=6, heads=8,
+                w_recon=1.0, w_terminal=2.0, w_monotone=0.5, w_relation=1.0,
+                w_walk=2.0, w_gap=1.0, weight_decay=3.0e-4,
+                workers=0, out="outputs/grt3")
 train_crt(tr, va, cfg, elasticity=el)
 print("[crt] DONE", flush=True)
