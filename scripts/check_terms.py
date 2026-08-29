@@ -15,7 +15,7 @@ from reroom.data.corpus import iter_scenes, split_scenes
 from reroom.generative.train import RetargetPairs, _collate_fn
 from reroom.generative.walkable import boundary_outside, object_reachability
 
-scenes = list(iter_scenes())
+scenes = [s for s in iter_scenes("data/processed", limit=None, min_objects=6)]
 tr, _, _ = split_scenes(scenes)
 ds = RetargetPairs(tr[:64], (1, 2, 3), None, seed=0, cache=True)
 b = _collate_fn([ds[i] for i in range(16)])
