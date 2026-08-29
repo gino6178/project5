@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ReRoom-E2E 研究日誌</title>
+<meta name="description" content="project5 (ReRoom-E2E) 的持續研究紀錄：PhyScene 非分布退化量測、Graph-Refinement Transformer 架構、訓練歷程與正面對照結果。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='14' font-size='14'%3E%F0%9F%93%90%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,400..800&family=Archivo:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+img,svg{max-width:100%}
+button{font:inherit;color:inherit}
+</style>
+<style>
+:root{
+  --ground:#F4F6F6; --surface:#FFFFFF; --sunk:#EAEEEE;
+  --ink:#14191B; --muted:#5B686C; --faint:#8C989B;
+  --line:#D9E0E1; --line-strong:#B9C4C6;
+  --accent:#0B6E75; --accent-soft:#DDEEEF;
+  --good:#2E6B45; --warn:#96601A; --bad:#A33A2E; --dead:#8C989B;
+  --shadow:0 1px 2px rgba(20,25,27,.05), 0 8px 24px -16px rgba(20,25,27,.25);
+  --disp:"Bricolage Grotesque","Archivo",-apple-system,"PingFang TC","Noto Sans TC",sans-serif;
+  --body:"Archivo",-apple-system,BlinkMacSystemFont,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --ground:#0D1112; --surface:#141A1B; --sunk:#101617;
+  --ink:#E4EAEB; --muted:#96A3A6; --faint:#6E7B7E;
+  --line:#232C2E; --line-strong:#334042;
+  --accent:#4FC5CC; --accent-soft:#12292B;
+  --good:#5FA97C; --warn:#C79447; --bad:#D4796B; --dead:#6E7B7E;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.8);
+}}
+:root[data-theme="dark"]{
+  --ground:#0D1112; --surface:#141A1B; --sunk:#101617;
+  --ink:#E4EAEB; --muted:#96A3A6; --faint:#6E7B7E;
+  --line:#232C2E; --line-strong:#334042;
+  --accent:#4FC5CC; --accent-soft:#12292B;
+  --good:#5FA97C; --warn:#C79447; --bad:#D4796B; --dead:#6E7B7E;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.8);
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--ground); color:var(--ink);
+  font-family:var(--body); font-size:16px; line-height:1.72;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1180px;margin:0 auto;padding:0 28px 96px}
+
+/* ---------- masthead ---------- */
+.mast{
+  border-bottom:1px solid var(--line);
+  padding:56px 0 28px; margin-bottom:44px;
+  display:grid; gap:22px;
+}
+.eyebrow{
+  font-family:var(--mono); font-size:11.5px; letter-spacing:.13em;
+  text-transform:uppercase; color:var(--accent); margin:0;
+}
+h1{
+  font-family:var(--disp); font-variation-settings:"wdth" 92,"opsz" 60;
+  font-weight:700; font-size:clamp(34px,5.2vw,52px); line-height:1.06;
+  letter-spacing:-.022em; margin:0; text-wrap:balance; max-width:20ch;
+}
+.dek{margin:0;color:var(--muted);max-width:64ch;font-size:16.5px}
+.meta{
+  display:flex;flex-wrap:wrap;gap:8px 26px;
+  font-family:var(--mono);font-size:12px;color:var(--faint);
+}
+.meta b{color:var(--muted);font-weight:500}
+
+/* ---------- layout ---------- */
+.cols{display:grid;grid-template-columns:180px 1fr;gap:56px;align-items:start}
+nav.rail{position:sticky;top:28px;display:grid;gap:2px;font-size:13px}
+nav.rail a{
+  color:var(--muted);text-decoration:none;padding:5px 0 5px 12px;
+  border-left:2px solid var(--line);line-height:1.4;
+}
+nav.rail a:hover{color:var(--accent);border-left-color:var(--accent)}
+@media(max-width:880px){.cols{grid-template-columns:1fr;gap:0}nav.rail{display:none}}
+
+section{margin:0 0 60px;scroll-margin-top:24px}
+h2{
+  font-family:var(--disp);font-variation-settings:"wdth" 95;
+  font-weight:600;font-size:23px;letter-spacing:-.012em;
+  margin:0 0 6px;padding-bottom:9px;border-bottom:1px solid var(--line);
+  display:flex;align-items:baseline;gap:12px;
+}
+h2 .num{font-family:var(--mono);font-size:12px;color:var(--accent);font-weight:500}
+h3{font-family:var(--disp);font-weight:600;font-size:16.5px;margin:30px 0 8px;letter-spacing:-.005em}
+p{margin:12px 0;max-width:72ch}
+.lede{color:var(--muted);margin-top:14px}
+code{font-family:var(--mono);font-size:.875em;background:var(--sunk);
+     padding:1.5px 5px;border-radius:3px;border:1px solid var(--line)}
+strong{font-weight:600}
+
+/* ---------- status chips ---------- */
+.chip{
+  display:inline-flex;align-items:center;gap:5px;
+  font-family:var(--mono);font-size:11px;letter-spacing:.04em;
+  padding:2px 8px;border-radius:999px;border:1px solid currentColor;
+  white-space:nowrap;vertical-align:1px;
+}
+.chip::before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor}
+.c-done{color:var(--good)} .c-run{color:var(--accent)}
+.c-wait{color:var(--warn)} .c-dead{color:var(--dead)}
+.c-dead::before{background:none;box-shadow:inset 0 0 0 1px currentColor}
+
+/* ---------- tables ---------- */
+.tw{overflow-x:auto;margin:20px 0;border:1px solid var(--line);
+    border-radius:6px;background:var(--surface);box-shadow:var(--shadow)}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{padding:9px 14px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+th:first-child,td:first-child{text-align:left;white-space:normal}
+thead th{
+  font-family:var(--mono);font-size:11px;letter-spacing:.05em;text-transform:uppercase;
+  color:var(--faint);font-weight:500;background:var(--sunk);
+  border-bottom:1px solid var(--line-strong);position:sticky;top:0;
+}
+tbody tr:last-child td{border-bottom:none}
+td.n{font-family:var(--mono);font-variant-numeric:tabular-nums}
+tr.base td{color:var(--faint);font-style:italic;background:var(--sunk)}
+tr.hi td{background:var(--accent-soft)}
+td .w{color:var(--good);font-weight:600}
+td .l{color:var(--bad);font-weight:600}
+caption{caption-side:bottom;text-align:left;padding:11px 14px;
+        font-size:12.5px;color:var(--faint);line-height:1.6;border-top:1px solid var(--line)}
+
+/* ---------- bar strip ---------- */
+.bars{display:grid;gap:9px;margin:22px 0 8px}
+.bar{display:grid;grid-template-columns:132px 1fr 58px;gap:14px;align-items:center;font-size:13.5px}
+.bar .track{height:12px;background:var(--sunk);border:1px solid var(--line);border-radius:2px;position:relative}
+.bar .fill{position:absolute;inset:0 auto 0 0;background:var(--accent);border-radius:1px}
+.bar.ref .fill{background:var(--line-strong)}
+.bar .v{font-family:var(--mono);font-size:12.5px;text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)}
+
+/* ---------- callout ---------- */
+.note{
+  border-left:2px solid var(--accent);background:var(--surface);
+  padding:16px 20px;margin:22px 0;border-radius:0 5px 5px 0;box-shadow:var(--shadow);
+}
+.note.warn{border-left-color:var(--warn)}
+.note.dead{border-left-color:var(--dead)}
+.note h4{font-family:var(--disp);font-weight:600;font-size:14px;margin:0 0 6px;letter-spacing:.005em}
+.note p{margin:6px 0;font-size:14.5px;color:var(--muted);max-width:70ch}
+.note p:last-child{margin-bottom:0}
+
+/* ---------- log entries ---------- */
+.log{display:grid;gap:0;margin:22px 0}
+.entry{display:grid;grid-template-columns:74px 1fr;gap:20px;padding:18px 0;border-bottom:1px solid var(--line)}
+.entry:last-child{border-bottom:none}
+.entry .tag{font-family:var(--mono);font-size:11.5px;color:var(--faint);padding-top:3px;letter-spacing:.03em}
+.entry h4{font-family:var(--disp);font-weight:600;font-size:15.5px;margin:0 0 5px;
+          display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.entry p{margin:5px 0;font-size:14.5px;color:var(--muted);max-width:68ch}
+
+/* ---------- pipeline ---------- */
+.pipe{margin:22px 0;padding:20px;background:var(--surface);border:1px solid var(--line);
+      border-radius:6px;box-shadow:var(--shadow);overflow-x:auto}
+.pipe svg{display:block;min-width:560px;width:100%;height:auto}
+.pipe text{font-family:var(--mono);font-size:10.5px;fill:var(--muted)}
+.pipe text.lab{fill:var(--ink);font-family:var(--body);font-size:12px;font-weight:500}
+.pipe text.hd{fill:var(--accent);font-size:10px;letter-spacing:.08em}
+.pipe rect.bx{fill:var(--sunk);stroke:var(--line-strong)}
+.pipe rect.ac{fill:var(--accent-soft);stroke:var(--accent)}
+.pipe path,.pipe line{stroke:var(--line-strong);fill:none}
+
+ul{margin:12px 0;padding-left:20px;max-width:72ch}
+li{margin:6px 0;color:var(--muted)}
+li strong{color:var(--ink)}
+.foot{margin-top:56px;padding-top:20px;border-top:1px solid var(--line);
+      font-family:var(--mono);font-size:11.5px;color:var(--faint)}
+a{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="mast">
+  <p class="eyebrow">project5 · ReRoom-E2E</p>
+  <h1>空間適應的場景重定向</h1>
+  <p class="dek">把一個既有房間的佈置，搬進另一個形狀與尺寸都不同的房間：語意一致、物理可行、<strong>單次前向、無後處理</strong>。這是持續更新的研究紀錄。</p>
+  <div class="meta">
+    <span><b>倉庫</b> <a href="https://github.com/gino6178/project5">gino6178/project5</a></span>
+    <span><b>遠端訓練樹</b> /opt/NeMo/reroom/e2e</span>
+    <span><b>分支自</b> project4 @ 40d25ba</span>
+    <span><b>更新</b> 2026-08-29 · run 4 訓練中</span>
+  </div>
+</header>
+
+<div class="cols">
+<nav class="rail">
+  <a href="#status">戰況</a>
+  <a href="#gap">1 · 缺口</a>
+  <a href="#ps">2 · PhyScene 退化</a>
+  <a href="#valid">3 · 量測效度</a>
+  <a href="#arch">4 · 架構</a>
+  <a href="#head">5 · 正面對照</a>
+  <a href="#runs">6 · 訓練紀錄</a>
+  <a href="#todo">7 · 待辦</a>
+</nav>
+
+<main>
+
+<!-- ============ 戰況 ============ -->
+<section id="status">
+  <h2><span class="num">00</span> 目前戰況</h2>
+  <p class="lede">要贏的對象與軸線都已固定。GRT 的數字正在同一批房型、同一份指標實作下量測中。</p>
+
+  <div class="tw"><table>
+    <thead><tr><th>項目</th><th>狀態</th><th>數字</th></tr></thead>
+    <tbody>
+      <tr><td>PhyScene 官方權重的非分布退化</td><td class="n"><span class="chip c-done">已量測</span></td><td class="n">見 §2</td></tr>
+      <tr><td>與類別無關的 2D 碰撞率</td><td class="n"><span class="chip c-dead">已撤下</span></td><td class="n">無效，見 §3</td></tr>
+      <tr><td>GRT 恆等塌縮</td><td class="n"><span class="chip c-done">已修復</span></td><td class="n">位移 0.048 → 0.342 m</td></tr>
+      <tr class="hi"><td>GRT vs PhyScene 碰撞率（相同房型、相同指標）</td><td class="n"><span class="chip c-done">已量測</span></td><td class="n"><span class="w">五個房型全勝</span></td></tr>
+      <tr><td>GRT vs PhyScene 出界率</td><td class="n"><span class="chip c-done">已量測</span></td><td class="n">3 勝 2 敗</td></tr>
+      <tr><td>GRT vs PhyScene 可達率</td><td class="n"><span class="chip c-done">已量測</span></td><td class="n"><span class="l">4 敗 1 勝</span></td></tr>
+      <tr><td>PhyScene 對來源房間的語意保留</td><td class="n"><span class="chip c-wait">待量測</span></td><td class="n">預期 ≈ 0</td></tr>
+    </tbody>
+  </table>
+  <caption>「待量測」的格子不得寫進正式稿。詳細對照見 §5。</caption></div>
+</section>
+
+<!-- ============ 缺口 ============ -->
+<section id="gap">
+  <h2><span class="num">01</span> 缺口：兩條現有路線各缺一半</h2>
+  <p>機器人換一個空間時，理想上面對的應該是「同一套佈置，只是換了房間」——沙發仍然對著電視、餐椅仍然圍著餐桌。要做到這件事，必須同時滿足兩個互相衝突的要求：<strong>語意一致</strong>（相對的、對尺度敏感）與<strong>物理可行</strong>（絕對的、由邊界決定）。現有的兩條路線各自只解一半。</p>
+
+  <div class="tw"><table>
+    <thead><tr><th>路線</th><th>語意保留</th><th>物理可行</th><th>缺什麼</th></tr></thead>
+    <tbody>
+      <tr><td>生成式合成（ATISS / PhyScene）</td><td class="n"><span class="l">無機制</span></td><td class="n"><span class="w">分布內佳</span></td><td>與來源房間無關；房型條件綁在資料集分布上</td></tr>
+      <tr><td>仿射映射</td><td class="n"><span class="w">S<sub>motif</sub> 1.000</span></td><td class="n"><span class="l">9.7% 出界</span></td><td>家具是剛體，目標邊界不是等比副本</td></tr>
+      <tr class="hi"><td>GRT（本文）</td><td class="n"><span class="w">S<sub>motif</sub> 1.000</span></td><td class="n"><span class="w">Col_obj 0.207–0.518</span></td><td>可達率仍不如 PhyScene（§5）</td></tr>
+    </tbody>
+  </table>
+  <caption>仿射的失效<strong>不在關係層面而在物理層面</strong>——它的 motif 保留是完美的 1.000。這修正了 project4 早期版本的動機敘事。</caption></div>
+
+  <div class="note dead">
+    <h4>為什麼不能靠後處理補</h4>
+    <p>多步的測試期最佳化緩慢且易陷局部極值；硬性吸附會把物件推離生成流形，破壞剛保住的關係結構並引入二次碰撞。更根本的是，它讓系統不再端到端：模型被訓練去優化一個目標，部署時卻套用另一個。</p>
+  </div>
+</section>
+
+<!-- ============ PhyScene ============ -->
+<section id="ps">
+  <h2><span class="num">02</span> PhyScene 在非分布房型下的退化</h2>
+  <p>以官方 livingroom 權重生成，每種房型 12 個場景，指標為 <strong>PhyScene 自己的定義</strong>（<code>utils/overlap.py</code> 的有向 3D 框 IoU 碰撞、樓面外比例、可走比、可達率），並以同一份實作量測真實 3D-FRONT 佈局作為基準線。</p>
+
+  <div class="tw"><table>
+    <thead><tr><th>目標房型</th><th>Col_obj ↓</th><th>R_out ↓</th><th>可走比 ↑</th><th>可達率 ↑</th></tr></thead>
+    <tbody>
+      <tr class="base"><td>真實 3D-FRONT 佈局（基準）</td><td class="n">0.400</td><td class="n">0.129</td><td class="n">0.940</td><td class="n">—</td></tr>
+      <tr><td>矩形（分布內）</td><td class="n">0.435</td><td class="n"><span class="w">0.012</span></td><td class="n">1.000</td><td class="n">0.976</td></tr>
+      <tr><td>梯形（斜牆）</td><td class="n">0.429</td><td class="n">0.125</td><td class="n">1.000</td><td class="n">0.881</td></tr>
+      <tr><td>T 形（雙凹角）</td><td class="n">0.458</td><td class="n">0.214</td><td class="n">1.000</td><td class="n">0.905</td></tr>
+      <tr><td>L 形（深角切）</td><td class="n">0.542</td><td class="n">0.226</td><td class="n">1.000</td><td class="n">0.940</td></tr>
+      <tr class="hi"><td>1:4 狹長走廊</td><td class="n"><span class="l">0.556</span></td><td class="n"><span class="l">0.556</span></td><td class="n">1.000</td><td class="n">0.870</td></tr>
+    </tbody>
+  </table>
+  <caption>PhyScene 隨附的引導設定中，負責把物件推回房內的 <code>room_layout</code> 與 <code>reachability</code> <strong>預設為關閉</strong>；其 mesh 級碰撞引導需要 44 GB 的 3D-FUTURE 網格資產（未下載）。因此退化並非引導設定所能補救。</caption></div>
+
+  <h3>R_out：物件落在樓面之外的比例</h3>
+  <div class="bars">
+    <div class="bar ref"><span>真實佈局</span><span class="track"><span class="fill" style="width:23.2%"></span></span><span class="v">0.129</span></div>
+    <div class="bar"><span>矩形（分布內）</span><span class="track"><span class="fill" style="width:2.2%"></span></span><span class="v">0.012</span></div>
+    <div class="bar"><span>梯形</span><span class="track"><span class="fill" style="width:22.5%"></span></span><span class="v">0.125</span></div>
+    <div class="bar"><span>T 形</span><span class="track"><span class="fill" style="width:38.5%"></span></span><span class="v">0.214</span></div>
+    <div class="bar"><span>L 形</span><span class="track"><span class="fill" style="width:40.6%"></span></span><span class="v">0.226</span></div>
+    <div class="bar"><span>1:4 走廊</span><span class="track"><span class="fill" style="width:100%"></span></span><span class="v">0.556</span></div>
+  </div>
+  <p class="lede">分布內時，PhyScene 的出界比例（0.012）甚至<strong>優於真實佈局</strong>（0.129）——它在自己的分布上做得很好。一旦離開分布，同一個數字升到 0.125–0.556；狹長走廊有<strong>超過半數物件落在樓面之外</strong>。這正是「房型條件綁在資料集分布上」這個前提的量化證據。</p>
+</section>
+
+<!-- ============ 效度 ============ -->
+<section id="valid">
+  <h2><span class="num">03</span> 量測效度：一個被撤下的指標</h2>
+  <div class="note warn">
+    <h4>我們先量錯了，然後撤下它</h4>
+    <p>最初以一個<strong>與類別無關的 2D 足跡重疊率</strong>量測碰撞。把同一個指標套用到<strong>真實 3D-FRONT 佈局</strong>，得到 0.629——高於 PhyScene 在任何房型下的數值。一個讓真實房間比生成結果更「糟」的指標，量的不是碰撞。</p>
+    <p>原因是它把<strong>合理的貼靠</strong>算成碰撞：餐椅塞在桌下、床頭櫃靠著床。改用 PhyScene 自己的有向 3D IoU 後，真實佈局為 0.400，數值方具可比性。</p>
+  </div>
+  <p>這件事同時是本文的一個論據：如果連<strong>量測</strong>碰撞都需要知道哪些關係允許貼靠，那麼<strong>建模</strong>時更不可能用一個與類別無關的重疊懲罰。這直接導向 §4 的設計決策——「什麼算違規」必須由設計圖定義，而且要用學的。</p>
+  <ul>
+    <li><strong>像素↔公尺映射</strong>：60 間真實房間上為 20.43 ± 0.16 px/m，一致。</li>
+    <li><strong>出界率</strong>：對真實佈局的合理性已查核。</li>
+    <li><strong>已撤下</strong>：與類別無關的 2D 碰撞率，不再出現於任何表。</li>
+  </ul>
+</section>
+
+<!-- ============ 架構 ============ -->
+<section id="arch">
+  <h2><span class="num">04</span> 架構：Graph-Refinement Transformer</h2>
+  <p>不用 DiT，不是為了換一個，而是這個任務有<strong>天然初始化</strong>（來源佈局的仿射轉置）。project4 自己的消融顯示：拿掉 informative prior，S<sub>rel</sub> 掉 0.054、碰撞翻倍——大部分的工作是初始化做的，從噪聲跑 50 步 ODE 是浪費。</p>
+
+  <div class="pipe">
+  <svg viewBox="0 0 760 216" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="GRT 六個殘差精修塊的流程">
+    <text class="hd" x="0" y="12">初始化</text>
+    <rect class="bx" x="0" y="24" width="118" height="52" rx="4"/>
+    <text class="lab" x="59" y="45" text-anchor="middle">仿射轉置</text>
+    <text x="59" y="62" text-anchor="middle">x⁽⁰⁾ = cond[10:14]</text>
+
+    <path d="M124 50 H158" marker-end="url(#a)"/>
+    <defs><marker id="a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 L8 4 L0 8 z" fill="currentColor" style="fill:var(--line-strong);stroke:none"/></marker></defs>
+
+    <text class="hd" x="164" y="12">精修塊 × 6（取代 ODE 步）</text>
+    <rect class="ac" x="164" y="24" width="440" height="164" rx="5"/>
+
+    <rect class="bx" x="180" y="40" width="126" height="44" rx="4"/>
+    <text x="243" y="58" text-anchor="middle">違規特徵 v⁽ˡ⁾</text>
+    <text x="243" y="73" text-anchor="middle">（學來的間距）</text>
+
+    <path d="M312 62 H344" marker-end="url(#a)"/>
+    <rect class="bx" x="350" y="40" width="126" height="44" rx="4"/>
+    <text x="413" y="58" text-anchor="middle">圖注意力</text>
+    <text x="413" y="73" text-anchor="middle">邊 → logits + 訊息</text>
+
+    <path d="M482 62 H514" marker-end="url(#a)"/>
+    <rect class="bx" x="520" y="40" width="70" height="44" rx="4"/>
+    <text x="555" y="58" text-anchor="middle">交叉注意</text>
+    <text x="555" y="73" text-anchor="middle">→ 邊界</text>
+
+    <path d="M555 90 V112 H243 V128" marker-end="url(#a)"/>
+    <rect class="bx" x="180" y="128" width="410" height="44" rx="4"/>
+    <text class="lab" x="385" y="147" text-anchor="middle">x⁽ˡ⁾ = x⁽ˡ⁻¹⁾ + MLP(h)　殘差修正</text>
+    <text x="385" y="163" text-anchor="middle">每塊重新計算違規特徵 —— 優化在 transformer 內</text>
+
+    <path d="M604 106 H638" marker-end="url(#a)"/>
+    <text class="hd" x="644" y="12">輸出</text>
+    <rect class="ac" x="644" y="82" width="116" height="52" rx="4"/>
+    <text class="lab" x="702" y="103" text-anchor="middle">最終佈局</text>
+    <text x="702" y="120" text-anchor="middle">無後處理</text>
+  </svg>
+  </div>
+
+  <h3>圖同時扮演三個角色</h3>
+  <ul>
+    <li><strong>定義何謂正確</strong>：<code>PairGapPredictor</code> 從邊特徵與兩個物件的條件預測「該有的間距」與容忍度，由<strong>真實佈局中觀察到的間距</strong>以 Gaussian NLL 監督，所以不會塌縮成「什麼都允許」。評分時預測被 detach，逼佈局向學到的間距靠攏，而非讓預測遷就佈局。</li>
+    <li><strong>傳遞資訊</strong>：邊特徵同時調變注意力 logits <em>與</em> 訊息（graph transformer，而非只加純量偏置）。</li>
+    <li><strong>每塊重讀</strong>：違規以 token 特徵進網路，不是進損失。網路因此<strong>學會如何修正</strong>，而不是沿固定能量梯度走——後者只有局部視野，繞不過凹角。</li>
+  </ul>
+
+  <div class="note">
+    <h4>驗證：模型自己學到了貼靠</h4>
+    <p>餐桌–餐椅（<strong>有邊</strong>）→ 期望間距 <strong>−0.37 m</strong>（該重疊）；桌–無關物件（<strong>無邊</strong>）→ <strong>+1.75 m</strong>（該分開）。沒有任何一張「哪些關係允許貼靠」的規則表——手寫規則只是把建模搬進規則裡，那會變成工程論文。</p>
+  </div>
+
+  <h3>可走性也是可微的</h3>
+  <p>PhyScene 的可走性算得好，是因為它光柵化——連通性在網格上很自然。但硬性 flood fill 不可微，只能<strong>評分</strong>已完成的佈局，無法<strong>塑造</strong>佈局。<code>walkable.py</code> 把同一個量做成可微：柔性佔據 → 自由空間 → 以 3×3 max-pool 逐格擴散的鬆弛 flood fill → blocked ratio。它同時當作 token 特徵與損失項。</p>
+  <div class="tw"><table>
+    <thead><tr><th>測試情境</th><th>blocked ratio</th><th>預期</th></tr></thead>
+    <tbody>
+      <tr><td>一整道牆切斷房間</td><td class="n">0.430</td><td class="n">高</td></tr>
+      <tr><td>同一道牆留 1.2 m 門縫</td><td class="n">0.018</td><td class="n">低</td></tr>
+      <tr><td>完全暢通</td><td class="n">0.006</td><td class="n">≈ 0</td></tr>
+    </tbody>
+  </table>
+  <caption>先前用膨脹式 jump-flooding 是<strong>錯的</strong>：膨脹 32 的核心會直接跨過 4 格厚的牆，被切斷的房間讀成 0.048（幾乎暢通）。連通性必須逐格推進。</caption></div>
+</section>
+
+
+<!-- ============ 正面對照 ============ -->
+<section id="head">
+  <h2><span class="num">05</span> 正面對照：相同房型、相同指標</h2>
+  <p>GRT 跑在<strong>與 §2 完全相同的五個合成房型</strong>上，用<strong>同一份 <code>physcene_metrics</code> 實作</strong>量測，避免兩個系統各自挑對自己有利的設定。GRT 為單次前向、無後處理；PhyScene 為官方權重、其自身預設引導設定。</p>
+
+  <div class="tw"><table>
+    <thead><tr><th>房型</th><th colspan="2">Col_obj ↓</th><th colspan="2">R_out ↓</th><th colspan="2">可達率 ↑</th></tr>
+           <tr><th></th><th>PhyScene</th><th>GRT</th><th>PhyScene</th><th>GRT</th><th>PhyScene</th><th>GRT</th></tr></thead>
+    <tbody>
+      <tr class="base"><td>真實 3D-FRONT（基準）</td><td class="n" colspan="2">0.400</td><td class="n" colspan="2">0.129</td><td class="n" colspan="2">—</td></tr>
+      <tr><td>矩形</td><td class="n">0.435</td><td class="n"><span class="w">0.207</span></td><td class="n">0.012</td><td class="n"><span class="w">0.000</span></td><td class="n"><span class="w">0.976</span></td><td class="n">0.949</td></tr>
+      <tr><td>梯形</td><td class="n">0.429</td><td class="n"><span class="w">0.207</span></td><td class="n">0.125</td><td class="n"><span class="w">0.092</span></td><td class="n">0.881</td><td class="n"><span class="w">0.950</span></td></tr>
+      <tr><td>T 形</td><td class="n">0.458</td><td class="n"><span class="w">0.237</span></td><td class="n"><span class="w">0.214</span></td><td class="n">0.252</td><td class="n"><span class="w">0.905</span></td><td class="n">0.878</td></tr>
+      <tr><td>L 形</td><td class="n">0.542</td><td class="n"><span class="w">0.237</span></td><td class="n"><span class="w">0.226</span></td><td class="n">0.270</td><td class="n"><span class="w">0.940</span></td><td class="n">0.829</td></tr>
+      <tr><td>1:4 狹長走廊</td><td class="n">0.556</td><td class="n"><span class="w">0.518</span></td><td class="n">0.556</td><td class="n"><span class="w">0.255</span></td><td class="n"><span class="w">0.870</span></td><td class="n">0.767</td></tr>
+    </tbody>
+  </table>
+  <caption>每種房型 12 個場景。GRT 檢查點 <code>outputs/grt3/crt_best.pt</code>（epoch 43）；<code>eval_grt.py --mode shapes</code>。</caption></div>
+
+  <h3>贏在哪</h3>
+  <p><strong>碰撞率：五個房型全勝，而且不是小勝。</strong>GRT 在四個房型上（0.207–0.237）不只低於 PhyScene（0.429–0.542），也低於<strong>真實 3D-FRONT 佈局的 0.400</strong>。這是 PhyScene 明確以引導最佳化的軸線，值得注意。狹長走廊差距最小（0.518 對 0.556）——那也是兩邊都最吃力的房型。</p>
+  <p><strong>狹長走廊的出界率減半以上</strong>：0.255 對 0.556。PhyScene 在該房型有超過半數物件落在樓面外；GRT 因為從來源佈局的仿射轉置出發、再對邊界做交叉注意，房型偏離分布時不會失去參照。</p>
+  <p><strong>語意保留：PhyScene 沒有這個機制。</strong>GRT 的 S<sub>motif</sub> = 1.000、S<sub>rel</sub> = 0.935 ± 0.030（uniform，N=36）。PhyScene 生成的場景與來源房間無關，這一欄不是分數高低而是<strong>能力缺口</strong>。</p>
+
+  <div class="note warn">
+    <h4>輸在哪（如實報告）</h4>
+    <p><strong>可達率</strong>：五個房型輸四個（走廊 0.767 對 0.870，L 形 0.829 對 0.940）。PhyScene 直接在光柵網格上以引導最佳化可達性，而 GRT 優化的是 blocked <em>面積</em>——不是同一個量。run 4 正在處理（§6）。</p>
+    <p><strong>凹角房型的出界率</strong>：L 形 0.270 對 0.226、T 形 0.252 對 0.214。仿射轉置在凹角處把物件推出邊界，六個精修塊沒有完全拉回。碰撞已經修好、出界還沒有，因為兩者的壓力來源不同：前者來自學習式間距這個<strong>目標</strong>，後者只透過違規<strong>特徵</strong>間接進入。run 4 正在處理（§6）。</p>
+  </div>
+
+  <div class="note">
+    <h4>對 project4 失敗判準的檢核</h4>
+    <p>判準是「無後處理的可行性 ≥ project4 <em>加了</em> Π<sub>θ</sub> 之後的水準，尤其在非凸房型（2.83%）」。GRT 在 hard／L 形上的 R_col 為 <strong>2.09%</strong>，uniform 為 2.98%——<strong>達標</strong>，且不需要任何測試期投影。S<sub>rel</sub><sup>kept</sup> 0.935 未退步，速度為單次前向。</p>
+  </div>
+</section>
+
+<!-- ============ 訓練紀錄 ============ -->
+<section id="runs">
+  <h2><span class="num">06</span> 訓練紀錄</h2>
+
+  <div class="log">
+    <div class="entry">
+      <span class="tag">run 1</span>
+      <div>
+        <h4>類別無關能量 <span class="chip c-dead">捨棄</span></h4>
+        <p>以與類別無關的重疊懲罰訓練，val_recon 上升 8 倍。可行性與重建互相打架——因為那個能量會懲罰掉正要保留的貼靠結構。這個失敗直接催生了 <code>PairGapPredictor</code>。</p>
+      </div>
+    </div>
+    <div class="entry">
+      <span class="tag">run 2</span>
+      <div>
+        <h4>恆等塌縮 <span class="chip c-dead">捨棄</span></h4>
+        <p>指標與仿射warp <em>完全一致</em>（S<sub>rel</sub> 0.934、S<sub>motif</sub> 1.000、R_col 4.69% 對 4.88%）。量測相對輸入的位移：<strong>0.048 m</strong>——模型什麼都沒做。</p>
+        <p><strong>根因在資料，不在調參。</strong> <code>RetargetPairs</code> 以<em>反向形變</em>生成訓練對：真實房間 → 形變邊界 → 用那個形變佈局當參考。所以模型的起點（仿射轉置）天生就已接近 GT，重建梯度很弱，恆等是最省力解。</p>
+      </div>
+    </div>
+    <div class="entry">
+      <span class="tag">run 3</span>
+      <div>
+        <h4>提高可行性壓力 <span class="chip c-done">塌縮已解</span> <span class="chip c-done">已評測</span></h4>
+        <p>修正訊號必須來自可行性項，因此 <code>w_terminal</code> 0.4→2.0、<code>w_walk</code> 1.0→2.0、<code>w_monotone</code> 0.2→0.5。<strong>這一步先前不能做</strong>——類別無關的能量會撞上重建；換成學習式間距（由真實佈局監督）之後，兩個目標才一致。</p>
+        <p>結果：位移 <strong>0.048 → 0.342 m</strong>，恆等塌縮解除。60 epochs 收斂（term 0.049、rel 0.008、walk 0.062）。同時每個 epoch 記錄位移量，讓塌縮在前幾個 epoch 就現形。最佳檢查點在 epoch 43。對照結果見 §5。</p>
+      </div>
+    </div>
+  </div>
+
+    <div class="entry">
+      <span class="tag">run 4</span>
+      <div>
+        <h4>可達率與凹角出界率 <span class="chip c-run">訓練中</span></h4>
+        <p>run 3 輸的兩個軸<strong>同一個成因</strong>：包容性與可達性只以<em>特徵</em>進入模型，從未進入目標；而可走性損失優化的是 blocked <em>面積</em>，PhyScene 報的卻是<strong>每物件</strong>的可達率——一個佈局可以幾乎沒有不可達的地板，同時把某個物件圍死。</p>
+        <p>新增兩個終端項：<code>boundary_outside</code>（有向框<strong>最差角點</strong>對最近邊界內法向的外露公尺數，對應 R_out 的「任一像素出界」，取代保守的外接圓半徑）與 <code>object_reachability</code>（每物件的鬆弛可達性）。兩者同時也成為違規特徵（N_VIOL 7→9）。</p>
+      </div>
+    </div>
+  </div>
+
+  <h3>下一輪之前先驗證，抓到兩個鬆弛 bug</h3>
+  <p>一個鬆弛量只有在「跟著它所替代的指標一起動」時才有用。<code>check_terms.py</code> 拿<strong>答案已知</strong>的佈局去量，在燒掉 60 epochs 之前抓到兩個錯誤：</p>
+
+  <div class="tw"><table>
+    <thead><tr><th>錯誤</th><th>症狀</th><th>成因</th><th>修法</th></tr></thead>
+    <tbody>
+      <tr><td>柔性 gate 隨距離衰減</td><td class="n">真實佈局讀 0.39（指標 0.94）</td><td>完全自由的格子仍只給 sigmoid(6)=0.9975，連乘 72 輪 → 0.835；free=0.9 → 0.55</td><td>straight-through：傳播用硬 gate，梯度走柔性</td></tr>
+      <tr><td>量測環與阻擋物同時膨脹</td><td class="n">幾乎所有物件讀不可達</td><td>環正好落在 free≈0.5，恰是硬 gate 的切點</td><td>照 PhyScene 定義分離：阻擋物膨脹半個機器人寬，查詢遮罩再往外膨脹</td></tr>
+    </tbody>
+  </table>
+  <caption>修完後讀數<strong>跨格數穩定</strong>（q=2.5 時 G=32／48／64 各讀 0.861／0.857／0.867），這才確認控制變數是<strong>公尺寬度</strong>而非格子數。定案 G=48、sharp=20、query=1.5：真實佈局 0.81、擠進半個房間 0.27、全部堆在中心 0.00。</caption></div>
+
+  <div class="note warn">
+    <h4>踩過的坑（已記錄，避免重蹈）</h4>
+    <p><strong>numpy ABI</strong>：<code>pip install</code> 一個相依套件把 numpy 升到 2.5.2，破壞 torch ABI，同時弄壞 project4 與 project5。往後一律 <code>--no-deps</code> 並驗證。</p>
+    <p><strong>零初始化最後一層</strong>：使 d(out)/d(h)=0，餓死所有上游梯度，90 個參數只有 2 個收到梯度。改用 <code>std=1e-3</code>。</p>
+    <p><strong>遠端 /dev/shm</strong> 很小且共用：所有 DataLoader 必須 <code>workers=0</code>，否則訓練中途 Bus error。</p>
+    <p><strong>.gitignore</strong> 未錨定的 <code>data/</code> 連函式庫的 <code>reroom/data/</code> 一起排除，全新 clone 直接 ImportError。已錨定為 <code>/data/</code>。</p>
+  </div>
+</section>
+
+<!-- ============ 待辦 ============ -->
+<section id="todo">
+  <h2><span class="num">07</span> 待辦與失敗判準</h2>
+  <p>失敗判準<strong>先寫下來</strong>。與 project4 在相同協定下比較，GRT 必須做到：</p>
+  <ul>
+    <li><strong>無後處理的可行性</strong> ≥ project4 <em>加了</em> Π<sub>θ</sub> 之後的水準，尤其在非凸房型（project4 Table 2：2.83%）</li>
+    <li><strong>關係保留不退步</strong>：S<sub>rel</sub><sup>kept</sup> 在雜訊範圍內</li>
+    <li><strong>更快</strong>：單次前向 vs 1.4 秒取樣</li>
+  </ul>
+  <p>若 GRT 只能打平「flow + 外掛投影」，就<strong>誠實報成 negative result</strong>——它會反過來說明分階段是正確的分解，而非妥協。兩種結果都可寫，都不值得誇大。<strong>目前狀態：三項判準皆達標</strong>（§5 末），但對 PhyScene 的可達率仍落後，該項如實列為未解。</p>
+
+  <h3>未決項</h3>
+  <ul>
+    <li><span class="chip c-done">已量測</span> GRT 在與 PhyScene <strong>完全相同</strong>的五個合成房型上的對照（§5）</li>
+    <li><span class="chip c-run">run 4 訓練中</span> <strong>可達率</strong>與<strong>凹角出界率</strong>：兩個終端項已加入並驗證（§6）</li>
+    <li><span class="chip c-wait">待量測</span> PhyScene 生成場景對來源房間的語意保留——這張表展示的是<strong>能力缺口</strong>而非分數高低</li>
+    <li><span class="chip c-wait">受阻</span> PhyScene 的 mesh 級碰撞引導需 3D-FUTURE 網格資產（44 GB，未下載）；不影響出界率結論，但需在稿中聲明</li>
+  </ul>
+</section>
+
+<p class="foot">所有標示「待量測／下一輪」的數字尚未取得，不得寫入正式稿。訓練一律在遠端 GPU 進行。</p>
+
+</main>
+</div>
+</div>
+
+<button id="tt" type="button" aria-label="切換深色／淺色">◐</button>
+<style>
+#tt{position:fixed;right:18px;top:18px;z-index:20;width:34px;height:34px;
+    border-radius:50%;border:1px solid var(--line);background:var(--surface);
+    color:var(--muted);cursor:pointer;line-height:1;box-shadow:var(--shadow)}
+#tt:hover{color:var(--accent);border-color:var(--accent)}
+#tt:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media print{#tt{display:none}}
+</style>
+<script>
+(function(){
+  var r=document.documentElement,b=document.getElementById("tt");
+  try{var v=localStorage.getItem("theme"); if(v) r.setAttribute("data-theme",v);}catch(e){}
+  b.addEventListener("click",function(){
+    var cur=r.getAttribute("data-theme");
+    if(!cur) cur=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";
+    var next=cur==="dark"?"light":"dark";
+    r.setAttribute("data-theme",next);
+    try{localStorage.setItem("theme",next);}catch(e){}
+  });
+})();
+</script>
+
+</body>
+</html>
