@@ -189,7 +189,7 @@ a{color:var(--accent)}
     <span><b>倉庫</b> <a href="https://github.com/gino6178/project5">gino6178/project5</a></span>
     <span><b>遠端訓練樹</b> /opt/NeMo/reroom/e2e</span>
     <span><b>分支自</b> project4 @ 40d25ba</span>
-    <span><b>更新</b> 2026-08-29 · run 6 已評測</span>
+    <span><b>更新</b> 2026-08-29 · run 7 已評測（負面結果）</span>
   </div>
 </header>
 
@@ -408,6 +408,21 @@ a{color:var(--accent)}
   </table>
   <caption>run 6 用最難房型的碰撞、換來包容性與可達性。兩個檢查點都保留，正式稿要報哪一個取決於主張哪一軸。</caption></div>
 
+  <h3>run 7：把自由空間變成圖的節點 —— 沒有用</h3>
+  <p>失效機制已量清楚：L／T 仍在外面的物件<strong>深深在外</strong>（中位 0.47 m／0.31 m，最深 1.9 m），卡在仿射轉置填滿 bounding box 時放進去、而目標房間並不存在的象限；走廊的出界物件只有 0.09 m，是純擠壓。所以推論是模型缺少「哪裡有空地可以搬過去」的表示——邊界取樣只說牆在哪。</p>
+  <p>於是把可站立的自由空間取樣成 48 個節點、以可見性連邊（L 形的 notch 在圖上只透過 throat 相連）、與牆 token 一起進 cross-attention，並給每個物件到最近未佔用節點的位移向量。目標與權重完全沿用 run 6，以隔離架構的貢獻。</p>
+  <div class="tw"><table>
+    <thead><tr><th>shapes 彙總</th><th>run 6</th><th>run 7（+floor nodes）</th></tr></thead>
+    <tbody>
+      <tr class="hi"><td>R_out ↓</td><td class="n">0.156</td><td class="n">0.156</td></tr>
+      <tr><td>Col_obj ↓</td><td class="n">0.214</td><td class="n">0.228</td></tr>
+      <tr><td>可達率 ↑</td><td class="n">0.908</td><td class="n">0.904</td></tr>
+      <tr><td>S<sub>rel</sub> / S<sub>motif</sub> ↑</td><td class="n">0.827 / 0.960</td><td class="n">0.827 / 0.960</td></tr>
+    </tbody>
+  </table>
+  <caption>L 形 R_out 0.246→0.253、T 形 0.259→0.249。彙總不動。</caption></div>
+  <p><strong>資訊送到了，模型沒有用它。</strong>驗證過 <code>to_free</code> 確實指向空地（物件距最近節點 0.264 m，covering radius 0.52），但訓練資料上 <code>bnd</code> 早已是 0.03——<strong>訓練從未要求模型學會搬遷</strong>。失效只發生在評測的合成房型，這是<strong>泛化落差而非能力落差</strong>，補資訊解決不了沒有訓練訊號的問題。下一步應該是讓訓練分布涵蓋「目標房型與來源房間無關」的情境，而不是繼續加架構。</p>
+
   <div class="note warn">
     <h4>還沒解決的（如實報告）</h4>
     <p><strong>凹角房型的出界率仍然輸</strong>：L 形 0.246 對 0.226、T 形 0.259 對 0.214。這是 run 6 的兩個目標之一，<strong>沒有達成</strong>。走廊大幅改善（0.556→0.184）而 L／T 沒有，指向凹角本身而非一般性的包容性問題。</p>
@@ -540,7 +555,7 @@ a{color:var(--accent)}
   <ul>
     <li><span class="chip c-done">已量測</span> GRT 在與 PhyScene <strong>完全相同</strong>的五個合成房型上的對照（§5）</li>
     <li><span class="chip c-done">已達成</span> <strong>可達率</strong>：run 3 五輸一勝 → run 6 三勝一平一敗（§5）</li>
-    <li><span class="chip c-run">未解</span> <strong>凹角出界率</strong>：L／T 形仍輸 PhyScene。走廊大幅改善而 L／T 沒有，指向凹角本身</li>
+    <li><span class="chip c-run">未解</span> <strong>凹角出界率</strong>：L／T 形仍輸 PhyScene。已排除四種解釋——凹角半平面（精確）、損失/指標不匹配（出界是深的）、GT 授權（參考值僅 2 cm）、缺少空地表示（run 7 加了，沒用）。剩下的假設是<strong>訓練分布不涵蓋評測情境</strong></li>
     <li><span class="chip c-run">未解</span> <strong>非凸碰撞回到達標</strong>：run 6 為 3.81%，超過 2.83% 判準。需要同時拿下碰撞與可達性的設定</li>
     <li><span class="chip c-wait">待量測</span> PhyScene 生成場景對來源房間的語意保留——這張表展示的是<strong>能力缺口</strong>而非分數高低</li>
     <li><span class="chip c-wait">受阻</span> PhyScene 的 mesh 級碰撞引導需 3D-FUTURE 網格資產（44 GB，未下載）；不影響出界率結論，但需在稿中聲明</li>
