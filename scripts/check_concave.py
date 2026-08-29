@@ -1,14 +1,17 @@
 #!/usr/bin/env python
 """Test the diagnosis before building on it.
 
-Claim: containment via the nearest boundary sample's inward halfplane is wrong at
-reflex corners, which is why run 6 fixed the corridor's out-of-floor (0.556 ->
-0.184) but not the L and T shapes. If the claim holds, probe points sitting in
-the CUT-OUT quadrant of an L-shaped room -- unambiguously outside -- will read as
-contained by the halfplane test, while the floor-node test reads them correctly.
+The first claim tested here -- that containment via the nearest boundary sample's
+inward halfplane is wrong at reflex corners -- was REFUTED by this script: the
+halfplane reading matched shapely exactly on every probe, in the hall, beside the
+reflex corner and throughout the cut-out. Signed distance to the nearest boundary
+point is correct for any simple polygon; concavity does not break it, and the
+only error is the 0.375 m sample spacing.
 
-Ground truth is shapely's own distance from the polygon, so neither method is
-being graded against itself.
+The script is kept because the question it settles is still live: whichever
+predicate is used for containment has to be graded against shapely rather than
+against itself, and the floor-node test has to clear the same bar before it can
+replace anything.
 """
 import os, sys
 _ROOT = os.environ.get("REROOM_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -44,9 +47,7 @@ for k in range(64):
     nb.append(n)
 nb = np.array(nb)
 
-feat, adj, cover_r = floor_nodes(room, fr, m=48, robot=0.3)
-fpts = feat[:, 2:4] * 0 + np.stack([feat[:, 0] * fr.half1, feat[:, 1] * fr.half2], -1)
-fpts = fpts + fr.centre[None] if fpts.shape == fr.centre[None].shape or True else fpts
+feat, adj, cover_r, fpts = floor_nodes(room, fr, m=48, robot=0.3)
 
 
 def truth(p):

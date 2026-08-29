@@ -72,7 +72,7 @@ def _even_sample(region, m: int, step: float) -> np.ndarray:
 
 
 def floor_nodes(room: Room, frame, m: int = N_FLOOR, robot: float = 0.3):
-    """Returns ``(feat, adj, cover_r)``.
+    """Returns ``(feat, adj, cover_r, pts)``.
 
     ``feat`` (m, FLOOR_DIM): normalised (u, v), metric (u*h1, v*h2), clearance to
     the wall in metres, and the node's degree fraction -- a local free-width
@@ -86,6 +86,11 @@ def floor_nodes(room: Room, frame, m: int = N_FLOOR, robot: float = 0.3):
     ``cover_r``: the covering radius, i.e. how far any interior point can be from
     the nearest node. Containment is charged only beyond this, so the sampling
     density never masquerades as a violation.
+
+    ``pts`` (m, 2): the same nodes in world metres. Returned explicitly because
+    rebuilding them from the normalised pair needs the frame axes, and doing that
+    by hand is an easy place to drop the rotation -- which is exactly the bug
+    that made the first version of check_concave.py report nonsense.
     """
     poly = as_polygon(room)
     stand = erode(poly, robot * 0.5)
@@ -124,4 +129,4 @@ def floor_nodes(room: Room, frame, m: int = N_FLOOR, robot: float = 0.3):
     v = (rel @ frame.axis2) / max(float(frame.half2), 1e-6)
     feat = np.stack([u, v, u * frame.half1, v * frame.half2, clear, deg],
                     axis=-1).astype(np.float32)
-    return feat, adj, np.float32(cover_r)
+    return feat, adj, np.float32(cover_r), pts.astype(np.float32)
