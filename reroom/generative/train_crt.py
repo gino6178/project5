@@ -13,6 +13,15 @@ The objective is the one we deploy (DESIGN.md §3):
                not bought by pulling the design apart
   boundary     metres the worst oriented-box corner pokes outside the room
   reach        1 - per-object soft reachability (PhyScene's R_reach, relaxed)
+
+The three physical terms are charged only for EXCEEDING the real layout in the
+same room, not for failing to reach zero. Real rooms are not empty: measured on
+ground truth, per-object reachability is 0.81 (so this loss is 0.19 there) and
+blocked area is nonzero. Driving them to zero asks for layouts more spread out
+than any real interior, and run 5 showed exactly that -- reach and containment
+pulled against each other and settled on objects spread out and partly out of
+bounds, with bnd 3.7x WORSE than the affine transplant it started from. Letting
+the corpus set the target is the same principle as the learned pair spacing.
 """
 from __future__ import annotations
 
@@ -169,17 +178,28 @@ def train_crt(scenes, val_scenes=None, cfg: CRTConfig | None = None, elasticity=
                     prev = cur
 
             rel = _relation_loss(x, batch)
-            walk = walkability(x, batch, G=32)[0].mean() if cfg.w_walk > 0 else x.new_zeros(())
-            # containment and reachability, both charged at the final block
-            bnd = boundary_outside(x, batch)
             mkf = batch["mask"].float()
-            bnd = (bnd * mkf).sum() / mkf.sum().clamp(min=1)
-            if cfg.w_reach > 0:
-                hit = object_reachability(x, batch, G=cfg.walk_G, robot=cfg.robot,
+            per_obj = lambda v: (v * mkf).sum() / mkf.sum().clamp(min=1)
+
+            def reach_loss(y):
+                hit = object_reachability(y, batch, G=cfg.walk_G, robot=cfg.robot,
                                           sharp=20.0, query=1.5)[0]
-                rch = ((1.0 - hit) * mkf).sum() / mkf.sum().clamp(min=1)
-            else:
-                rch = x.new_zeros(())
+                return per_obj(1.0 - hit)
+
+            # The real layout in this same room is the target, not zero. Charging
+            # only the excess keeps the physical terms from asking for something
+            # no real interior does; see the module docstring.
+            with torch.no_grad():
+                gt = batch["state"]
+                ref_walk = walkability(gt, batch, G=32)[0].mean()
+                ref_bnd = per_obj(boundary_outside(gt, batch))
+                ref_rch = reach_loss(gt) if cfg.w_reach > 0 else x.new_zeros(())
+
+            walk = ((walkability(x, batch, G=32)[0].mean() - ref_walk).clamp(min=0.0)
+                    if cfg.w_walk > 0 else x.new_zeros(()))
+            bnd = (per_obj(boundary_outside(x, batch)) - ref_bnd).clamp(min=0.0)
+            rch = ((reach_loss(x) - ref_rch).clamp(min=0.0)
+                   if cfg.w_reach > 0 else x.new_zeros(()))
             # trains what "correct spacing" means, from the real layouts themselves
             gapsup = gap_supervision(batch, model.gap)
 

@@ -38,7 +38,22 @@ print(f"[crt] scenes={len(scenes)} train={len(tr)} val={len(va)}", flush=True)
 # come from the feasibility terms, so they are raised sharply. That was unsafe
 # before, when a category-blind energy fought reconstruction; with the learned
 # per-pair spacing (trained on real layouts) the two objectives now agree.
-# Run 5 rebalances run 4, which failed by epoch 4 and never recovered: it drove
+# Run 6 changes the objective, not the weights. Run 5 held relations (rel 0.033)
+# and recovered val_recon (0.116), but bnd stayed 3.7x worse than the affine
+# transplant it starts from and recon stuck at 0.34 where run 3 reached 0.04.
+# Two measurements explain it. Gradient norms per term, unweighted: recon 0.94,
+# term 2.45, bnd 3.52, walk 4.85, rch 5.09 -- the weights had been balanced by
+# loss VALUE, which says nothing about the pull each term exerts. And real
+# layouts score 0.81 on the reachability proxy, i.e. this loss is 0.19 on ground
+# truth, so driving it to zero demands layouts more spread out than any real
+# interior. That is what fought containment: reach pushed objects apart, bnd
+# pulled them off the walls, and the compromise was spread out AND out of bounds.
+#
+# So the physical terms now charge only the EXCESS over the real layout in the
+# same room, and the weights are set against measured gradient norms rather than
+# loss values.
+#
+# Run 5 rebalanced run 4, which failed by epoch 4 and never recovered: it drove
 # collision down (term 0.98 -> 0.13) by scattering objects 1.18 m, which made
 # BOTH target axes worse (bnd 0.074 -> 0.355) and tore the design apart
 # (rel 0.027 -> 0.273, recon 0.017 -> 0.404). Adding w_bound and w_reach without
@@ -54,9 +69,9 @@ print(f"[crt] scenes={len(scenes)} train={len(tr)} val={len(va)}", flush=True)
 # 5.0 against 4.0, with the weight concentrated on the two axes actually being
 # fixed rather than on the one already won.
 cfg = CRTConfig(epochs=60, batch=128, lr=3.0e-4, d_model=384, n_blocks=6, heads=8,
-                w_recon=1.0, w_terminal=1.0, w_monotone=0.5, w_relation=3.0,
-                w_walk=0.5, w_gap=1.0, weight_decay=3.0e-4,
-                w_bound=2.0, w_reach=1.5, walk_G=48, robot=0.3,
-                workers=0, out="outputs/grt5")
+                w_recon=4.0, w_terminal=1.0, w_monotone=0.5, w_relation=3.0,
+                w_walk=0.3, w_gap=1.0, weight_decay=3.0e-4,
+                w_bound=1.0, w_reach=0.6, walk_G=48, robot=0.3,
+                workers=0, out="outputs/grt6")
 train_crt(tr, va, cfg, elasticity=el)
 print("[crt] DONE", flush=True)
