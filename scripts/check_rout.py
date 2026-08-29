@@ -15,21 +15,19 @@ the fix is to charge a rate, not a depth.
 import os, sys
 _ROOT = os.environ.get("REROOM_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT); os.chdir(_ROOT)
-import argparse
-import numpy as np, torch
-
-sys.argv = [sys.argv[0], "--mode", "shapes"] + sys.argv[1:]
 import importlib.util
-spec = importlib.util.spec_from_file_location("_eg", "scripts/eval_grt.py")
+import numpy as np
+from shapely.geometry import Point
 
-from reroom.data.corpus import iter_scenes, split_scenes
+# eval_grt.py runs its whole pipeline at import; drive it in shapes mode and then
+# reuse its loaded model, split and helpers rather than duplicating them.
+sys.argv = [sys.argv[0], "--mode", "shapes"] + sys.argv[1:]
+spec = importlib.util.spec_from_file_location("_eg", os.path.join(_ROOT, "scripts", "eval_grt.py"))
+EG = importlib.util.module_from_spec(spec); spec.loader.exec_module(EG)
+
 from reroom.geom.polygon import as_polygon, object_polygon
 from reroom.intent.motifs import build_motifs
 from reroom.intent.relations import build_scene_graph
-from reroom.intent.elasticity import load_elasticity
-from reroom.generative.refiner import GraphRefinementTransformer
-
-import scripts.eval_grt as EG   # reuses run(), mkroom(), _named_shapes()
 
 named = EG._named_shapes()
 depths = {k: [] for k in named}
@@ -49,12 +47,9 @@ for sd in EG.seeds:
                     d.append(0.0)
                 else:
                     # deepest excursion of the footprint past the wall
-                    d.append(float(max(rp.exterior.distance(
-                        __import__("shapely.geometry", fromlist=["Point"]).Point(c))
-                        for c in ext.exterior.coords) if ext.geom_type == "Polygon"
-                        else max(rp.exterior.distance(
-                            __import__("shapely.geometry", fromlist=["Point"]).Point(c))
-                            for gp in ext.geoms for c in gp.exterior.coords)))
+                    parts = [ext] if ext.geom_type == "Polygon" else list(ext.geoms)
+                    d.append(max(float(rp.exterior.distance(Point(c)))
+                                 for gp in parts for c in gp.exterior.coords))
             d = np.array(d)
             if len(d):
                 rates[name].append(float((d > 1e-6).mean()))
