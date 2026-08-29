@@ -175,7 +175,8 @@ def train_crt(scenes, val_scenes=None, cfg: CRTConfig | None = None, elasticity=
             mkf = batch["mask"].float()
             bnd = (bnd * mkf).sum() / mkf.sum().clamp(min=1)
             if cfg.w_reach > 0:
-                hit = object_reachability(x, batch, G=cfg.walk_G, robot=cfg.robot)[0]
+                hit = object_reachability(x, batch, G=cfg.walk_G, robot=cfg.robot,
+                                          sharp=20.0, query=1.5)[0]
                 rch = ((1.0 - hit) * mkf).sum() / mkf.sum().clamp(min=1)
             else:
                 rch = x.new_zeros(())

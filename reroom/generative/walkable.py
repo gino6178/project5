@@ -116,7 +116,7 @@ def soft_reachability(free, seed, rounds: int | None = None, barrier: float = 12
 
 
 def object_reachability(x, batch, G: int = 48, robot: float = 0.3,
-                        rounds: int | None = None, sharp: float = 12.0,
+                        rounds: int | None = None, sharp: float = 20.0,
                         query: float = 1.5):
     """Per-object soft reachability in [0,1] -- the differentiable analogue of
     PhyScene's ``R_reach``.
@@ -140,6 +140,13 @@ def object_reachability(x, batch, G: int = 48, robot: float = 0.3,
       is the same test; doing it on the query side keeps one flood fill. With
       the query at the blocker radius, every cell it covers has free ~ 0.5 --
       exactly where the gate cuts off -- so every object read as unreachable.
+
+    Verified against layouts with a known answer (``scripts/check_terms.py``).
+    At the defaults: real 3D-FRONT layouts 0.81, the same layouts scaled to half
+    the room 0.27, everything piled at the centre 0.00, against a metric that
+    scores real layouts ~0.94. The reading is now stable across grid resolution
+    (0.86 at G=32, 48 and 64 with a wider query), which is what says the fix was
+    the metric-space width rather than the cell count.
     """
     occ, room, blockers = soft_occupancy(x, batch, G, sharp=sharp,
                                          pad=robot * 0.5, per_object=True)
